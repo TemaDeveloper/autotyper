@@ -63,6 +63,8 @@ class Pipeline:
         if backend is None:
             backend = ClaudeBackend(client) if client is not None else providers.make_backend(settings)
         self.backend = backend
+        if hasattr(backend, "notice"):
+            backend.notice = lambda msg: self.on_status(msg)
         self.planner_model, self.worker_model = providers.models_for(settings)
         self.parallel = settings.max_parallel_workers if settings.provider == "claude" else providers.get(settings.provider).parallel
         self.on_status = on_status or (lambda msg: None)

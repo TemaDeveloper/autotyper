@@ -548,10 +548,20 @@ def _pick_model_for(name: str, key: str) -> str | None:
                 console.print("[red]Google rejected that key.[/] Copy it again from the page and retry.")
                 return None
             raise
-        model = providers.pick_gemini_model(ids)
-        if not model:
-            console.print("[red]No suitable Gemini model is available for this key.[/]")
-        return model
+        candidates = providers.gemini_candidates(ids)
+        console.print("Finding a Gemini model that answers on the free tier...")
+        for model in candidates[:8]:
+            with console.status(f"Trying {model}..."):
+                problem = providers.probe_model("gemini", key, model)
+            if not problem:
+                console.print(f"  [green]✔[/] {model}")
+                return model
+            console.print(f"  [dim]✘ {model}: {problem}[/]")
+            if problem == "key rejected":
+                console.print("[red]Google rejected that key.[/] Copy it again from the page and retry.")
+                return None
+        console.print("[red]No Gemini model answered right now.[/] Try again in a few minutes.")
+        return None
 
     r = httpx.get(f"{providers.get('openrouter').base_url}/key", headers={"Authorization": f"Bearer {key}"}, timeout=15.0)
     if r.status_code in (401, 403):
@@ -731,8 +741,8 @@ def cmd_solve(args) -> int:
     from .llm.pipeline import Pipeline
 
     wait = "usually 1-3 minutes" if prov.key != "ollama" else "on your Mac this can take 5-20 minutes"
-    with console.status(f"Thinking about the task... ({wait})") as status:
-        pipe = Pipeline(settings, on_status=lambda m: status.update(m))
+    with console.status(f"Thinking about the task... ({wait})") as status, _Ticker(status) as tick:
+        pipe = Pipeline(settings, on_status=tick.set)
         solution, issues = asyncio.run(pipe.solve(task, ctx))
     session = solution.save(new_session_dir(root))
     _print_plan(solution, issues)
@@ -748,6 +758,42 @@ def cmd_solve(args) -> int:
         console.print("Type it later with: [bold]autotyper type[/]")
         return 0
     return _type_solution(solution, settings)
+
+
+class _Ticker:
+    """Keeps the spinner text current and adds elapsed time, so long AI steps never look frozen."""
+
+    def __init__(self, status):
+        import threading
+        import time
+
+        self.status, self.time = status, time
+        self.msg = "Thinking about the task..."
+        self.start = time.monotonic()
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def set(self, msg: str) -> None:
+        if "switching to" in msg or "waiting" in msg:
+            console.print(f"[yellow]• {msg}[/]")
+        self.msg = msg
+        self._render()
+
+    def _render(self) -> None:
+        secs = int(self.time.monotonic() - self.start)
+        self.status.update(f"{self.msg}  [dim]{secs // 60}:{secs % 60:02d}[/]")
+
+    def _run(self) -> None:
+        while not self.stop.wait(1.0):
+            self._render()
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.stop.set()
+        return False
 
 
 def _latest_session(root: Path) -> Path | None:

@@ -14,6 +14,14 @@ from autotyper.task_input import TaskInput
 SCHEMA = {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}
 
 
+def sse(text, usage=(7, 3), finish="stop"):
+    chunks = [{"choices": [{"delta": {"content": text[: len(text) // 2]}}]},
+              {"choices": [{"delta": {"content": text[len(text) // 2:]}, "finish_reason": finish}]},
+              {"choices": [], "usage": {"prompt_tokens": usage[0], "completion_tokens": usage[1]}}]
+    body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+    return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
+
+
 def run(coro):
     return asyncio.run(coro)
 
@@ -38,8 +46,8 @@ def test_openai_compat_downgrades_format_and_parses():
         assert body["reasoning_effort"] == "high"  # xhigh maps to Gemini's highest
         if body.get("response_format", {}).get("type") == "json_schema":
             return httpx.Response(400, json={"error": {"message": "unsupported schema"}})
-        return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": '{"content": "x"}'}}],
-                                         "usage": {"prompt_tokens": 7, "completion_tokens": 3}})
+        assert body["stream"] is True
+        return sse('{"content": "x"}')
 
     b = OpenAICompatBackend("gemini", "https://g.test/v1", "k", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     data, usage = call(b)
@@ -65,7 +73,7 @@ def test_openai_compat_sends_images_as_data_urls():
     def handler(req):
         user = json.loads(req.content)["messages"][1]["content"]
         assert user[1]["image_url"]["url"].startswith("data:image/png;base64,AAAA")
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"content": "ok"}'}}]})
+        return sse('{"content": "ok"}')
 
     b = OpenAICompatBackend("gemini", "https://g.test", "k", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     content = [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}},
@@ -181,3 +189,41 @@ def test_incomplete_xml_gets_retry(project):
         TaskInput("t", [], ["t"]), scan_project(project)))
     assert sol.files[0].content == "<resources>\n</resources>\n"
     assert "cut off" in backend.calls[2]["content"][-1]["text"]
+
+
+def test_silent_model_switches_to_fallback():
+    seen, notices = [], []
+
+    def handler(req):
+        model = json.loads(req.content)["model"]
+        seen.append(model)
+        if model == "gemini-hangs":
+            raise httpx.ReadTimeout("silence", request=req)
+        return sse('{"content": "x"}')
+
+    b = OpenAICompatBackend("gemini", "https://g.test", "k", fallback_models=["gemini-works"],
+                            http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    b.notice = notices.append
+    assert run(b.complete(model="gemini-hangs", effort="high", system="s", content=[{"type": "text", "text": "t"}],
+                          schema=SCHEMA, max_tokens=10, label="planning"))[0] == {"content": "x"}
+    # later calls go straight to the model that works
+    run(b.complete(model="gemini-hangs", effort="high", system="s", content=[{"type": "text", "text": "t"}],
+                   schema=SCHEMA, max_tokens=10, label="writing"))
+    assert seen == ["gemini-hangs", "gemini-works", "gemini-works"]
+    assert "switching to gemini-works" in notices[0]
+
+
+def test_silent_model_without_fallback_explains():
+    def handler(req):
+        raise httpx.ReadTimeout("silence", request=req)
+
+    b = OpenAICompatBackend("gemini", "https://g.test", "k", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    with pytest.raises(LLMError, match="didn't answer"):
+        call(b)
+
+
+def test_gemini_candidates_newest_first_aliases_last():
+    ids = ["models/gemini-flash-latest", "models/gemini-3.5-flash", "models/gemini-3.8-flash", "models/gemini-3.5-flash-lite",
+           "models/gemini-3-flash-preview", "models/gemini-3.1-pro-preview"]
+    assert providers.gemini_candidates(ids) == ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3-flash-preview",
+                                                "gemini-flash-latest"]

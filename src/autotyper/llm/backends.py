@@ -208,19 +208,30 @@ class OllamaBackend:
 
 # ---------------------------------------------------------------------- OpenAI-compatible
 class OpenAICompatBackend:
-    """Gemini (generativelanguage.googleapis.com/v1beta/openai) and OpenRouter (openrouter.ai/api/v1)."""
+    """Gemini (generativelanguage.googleapis.com/v1beta/openai) and OpenRouter (openrouter.ai/api/v1).
+
+    Answers are streamed so a model that accepts a request but never answers is
+    detected after `read_timeout` seconds of silence instead of hanging. When that
+    happens, or a model is unavailable or out of free quota, the next model in
+    `fallback_models` takes over.
+    """
 
     FORMATS = ("json_schema", "json_object", "none")
 
     def __init__(self, name: str, base_url: str, api_key: str, http: httpx.AsyncClient | None = None,
-                 sleep: Callable[[float], Any] = asyncio.sleep, max_retries: int = 4):
+                 sleep: Callable[[float], Any] = asyncio.sleep, max_retries: int = 4,
+                 fallback_models: list[str] | None = None, read_timeout: float = 180.0):
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.http = http or httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=15.0))
+        self.http = http or httpx.AsyncClient()
         self.sleep = sleep
         self.max_retries = max_retries
+        self.fallbacks = list(fallback_models or [])
+        self.read_timeout = read_timeout
+        self.active_model: str | None = None  # set once we had to switch away from the requested model
         self.format_level = 0  # downgraded when a provider/model rejects structured output
+        self.notice: Callable[[str], None] = lambda msg: None
 
     def _response_format(self, schema: dict) -> dict | None:
         level = self.FORMATS[self.format_level]
@@ -230,7 +241,17 @@ class OpenAICompatBackend:
             return {"type": "json_object"}
         return None
 
+    def _switch_model(self, current: str, why: str) -> str | None:
+        while self.fallbacks:
+            nxt = self.fallbacks.pop(0)
+            if nxt != current:
+                self.active_model = nxt
+                self.notice(f"{current} {why} - switching to {nxt}")
+                return nxt
+        return None
+
     async def complete(self, *, model, effort, system, content, schema, max_tokens, label, progress=None):
+        model = self.active_model or model
         text, images = split_content(content)
         user_content: Any = text
         if images:
@@ -240,6 +261,7 @@ class OpenAICompatBackend:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         if self.name == "openrouter":
             headers.update({"HTTP-Referer": "https://github.com/TemaDeveloper/autotyper", "X-Title": "autotyper"})
+        timeout = httpx.Timeout(connect=15.0, read=self.read_timeout, write=60.0, pool=15.0)
         attempt = 0
         while True:
             body: dict[str, Any] = {
@@ -250,62 +272,109 @@ class OpenAICompatBackend:
                 ],
                 "max_tokens": max_tokens,
                 "temperature": 0.2,
+                "stream": True,
+                "stream_options": {"include_usage": True},
             }
             rf = self._response_format(schema)
             if rf:
                 body["response_format"] = rf
             if self.name == "gemini":
                 body["reasoning_effort"] = {"low": "low", "medium": "medium"}.get(effort, "high")
+
+            parts: list[str] = []
+            finish = None
+            usage = {"input": 0, "output": 0, "cache_read": 0}
+            status = 0
+            err_text = ""
+            retry_after = None
             try:
-                r = await self.http.post(f"{self.base_url}/chat/completions", json=body, headers=headers)
+                async with self.http.stream("POST", f"{self.base_url}/chat/completions", json=body,
+                                            headers=headers, timeout=timeout) as r:
+                    status = r.status_code
+                    if status != 200:
+                        err_text = (await r.aread()).decode(errors="replace")
+                        retry_after = _retry_after(r, err_text)
+                    else:
+                        async for line in r.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            payload = line[5:].strip()
+                            if payload == "[DONE]":
+                                break
+                            chunk = json.loads(payload)
+                            if chunk.get("error"):
+                                raise LLMError(f"{self.name} error during {label}: {chunk['error']}")
+                            for ch in chunk.get("choices") or []:
+                                c = (ch.get("delta") or {}).get("content")
+                                if isinstance(c, list):
+                                    c = "".join(p.get("text", "") for p in c if isinstance(p, dict))
+                                if c:
+                                    parts.append(c)
+                                finish = ch.get("finish_reason") or finish
+                            u = chunk.get("usage") or {}
+                            if u:
+                                usage = {"input": u.get("prompt_tokens", 0) or 0,
+                                         "output": u.get("completion_tokens", 0) or 0, "cache_read": 0}
+                            if progress and parts and len(parts) % 20 == 0:
+                                progress(len(parts))
+            except httpx.ReadTimeout:
+                nxt = self._switch_model(model, f"didn't answer for {int(self.read_timeout)}s")
+                if nxt:
+                    model, attempt = nxt, 0
+                    continue
+                raise LLMError(
+                    f"{self.name} model {model} didn't answer for {int(self.read_timeout)} seconds during {label}. "
+                    "Try again later, or pick another model with `autotyper login`."
+                )
             except httpx.HTTPError as e:
                 raise LLMError(f"Network error talking to {self.name} during {label}: {e}") from e
 
-            if r.status_code == 429 or r.status_code >= 500:
+            if status == 429 or status >= 500:
                 attempt += 1
-                if attempt > self.max_retries:
-                    if r.status_code == 429:
+                give_up = 2 if self.fallbacks else self.max_retries
+                if attempt > give_up:
+                    nxt = self._switch_model(model, "is over its free limit" if status == 429 else "keeps failing")
+                    if nxt:
+                        model, attempt = nxt, 0
+                        continue
+                    if status == 429:
                         raise LLMError(
                             f"{self.name} free-tier limit reached during {label}. Wait a minute (or until tomorrow "
                             "for daily limits) and run `autotyper solve` again, or switch AI with `autotyper login`."
                         )
-                    raise LLMError(f"{self.name} server error during {label}: {r.status_code}")
-                wait = _retry_after(r) or min(60.0, 5.0 * 2 ** (attempt - 1))
+                    raise LLMError(f"{self.name} server error during {label}: {status}")
+                wait = retry_after or min(60.0, 5.0 * 2 ** (attempt - 1))
+                self.notice(f"{self.name} {'rate limit' if status == 429 else 'server busy'} - "
+                            f"waiting {int(wait)}s (retry {attempt}/{give_up})")
                 await self.sleep(wait)
                 continue
-            if r.status_code == 400 and self.format_level < len(self.FORMATS) - 1:
+            if status == 400 and self.format_level < len(self.FORMATS) - 1:
                 self.format_level += 1  # model can't do this structured-output mode; try a simpler one
                 continue
-            if r.status_code in (401, 403):
+            if status in (401, 403):
                 raise LLMError(f"{self.name} rejected the API key. Run `autotyper login` to set it again.")
-            if r.status_code == 404:
+            if status == 404:
+                nxt = self._switch_model(model, "isn't available")
+                if nxt:
+                    model, attempt = nxt, 0
+                    continue
                 raise LLMError(f"{self.name} doesn't have the model '{model}'. Run `autotyper login` to pick another.")
-            if r.status_code != 200:
-                raise LLMError(f"{self.name} error during {label}: {r.status_code} {r.text[:300]}")
+            if status != 200:
+                raise LLMError(f"{self.name} error during {label}: {status} {err_text[:300]}")
 
-            data = r.json()
-            if data.get("error"):
-                raise LLMError(f"{self.name} error during {label}: {data['error']}")
-            choice = (data.get("choices") or [{}])[0]
-            if choice.get("finish_reason") == "length":
+            if finish == "length":
                 raise LLMError(f"The {label} output was cut off. Try a smaller task.")
-            msg = choice.get("message") or {}
-            text_out = msg.get("content") or ""
-            if isinstance(text_out, list):
-                text_out = "".join(p.get("text", "") for p in text_out if isinstance(p, dict))
-            u = data.get("usage") or {}
-            usage = {"input": u.get("prompt_tokens", 0) or 0, "output": u.get("completion_tokens", 0) or 0, "cache_read": 0}
             try:
-                return extract_json(text_out), usage
+                return extract_json("".join(parts)), usage
             except json.JSONDecodeError as e:
                 raise BadJSON(f"The model's {label} answer wasn't valid JSON.") from e
 
 
-def _retry_after(r: httpx.Response) -> float | None:
+def _retry_after(r: httpx.Response, body: str = "") -> float | None:
     try:
         v = float(r.headers.get("retry-after", ""))
         return min(v, 90.0)
     except ValueError:
         pass
-    m = re.search(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"', r.text)
+    m = re.search(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"', body)
     return min(float(m.group(1)), 90.0) if m else None

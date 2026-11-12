@@ -80,7 +80,13 @@ def make_backend(s: Settings):
     key = provider_key(p.key)
     if not key:
         raise LLMError(f"No {p.label} key yet. Run `autotyper login` and choose {p.label}.")
-    return OpenAICompatBackend(p.key, p.base_url, key)
+    fallbacks: list[str] = []
+    if p.key == "gemini":
+        try:
+            fallbacks = [m for m in gemini_candidates(list_gemini_models(key)) if m != s.gemini_model][:4]
+        except (httpx.HTTPError, ValueError):
+            fallbacks = []
+    return OpenAICompatBackend(p.key, p.base_url, key, fallback_models=fallbacks)
 
 
 def readiness(s: Settings) -> tuple[bool, str]:
@@ -149,14 +155,10 @@ def start_ollama(url: str = "http://localhost:11434", wait: float = 15.0) -> boo
 _GEMINI_SKIP = ("lite", "image", "tts", "audio", "live", "embedding", "vision", "native", "learnlm", "gemma", "aqa")
 
 
-def pick_gemini_model(ids: list[str]) -> str | None:
-    """Best general Flash model from Gemini's model list (Flash has the most generous free tier)."""
+def gemini_candidates(ids: list[str]) -> list[str]:
+    """General Flash models (the free tier's workhorse), newest first; moving aliases last."""
     names = [i.split("/", 1)[1] if i.startswith("models/") else i for i in ids]
-    if "gemini-flash-latest" in names:
-        return "gemini-flash-latest"
     flash = [n for n in names if n.startswith("gemini-") and "flash" in n and not any(x in n for x in _GEMINI_SKIP)]
-    if not flash:
-        return None
 
     def rank(n: str) -> tuple:
         m = re.search(r"gemini-(\d+(?:\.\d+)?)", n)
@@ -164,7 +166,36 @@ def pick_gemini_model(ids: list[str]) -> str | None:
         stable = not any(x in n for x in ("preview", "exp"))
         return (version, stable, -len(n))
 
-    return max(flash, key=rank)
+    versioned = sorted((n for n in flash if not n.endswith("latest")), key=rank, reverse=True)
+    return versioned + [n for n in flash if n.endswith("latest")]
+
+
+def pick_gemini_model(ids: list[str]) -> str | None:
+    c = gemini_candidates(ids)
+    return c[0] if c else None
+
+
+def probe_model(provider: str, key: str, model: str, timeout: float = 20.0) -> str:
+    """Send a tiny request. Returns '' if the model answers, else a short reason."""
+    p = get(provider)
+    try:
+        r = httpx.post(
+            f"{p.base_url}/chat/completions", headers={"Authorization": f"Bearer {key}"}, timeout=timeout,
+            json={"model": model, "messages": [{"role": "user", "content": "Reply with: ok"}], "max_tokens": 300},
+        )
+    except httpx.TimeoutException:
+        return "not responding"
+    except httpx.HTTPError as e:
+        return f"network error ({e.__class__.__name__})"
+    if r.status_code == 200:
+        return ""
+    if r.status_code == 429:
+        return "no free quota right now"
+    if r.status_code == 404:
+        return "not available"
+    if r.status_code in (401, 403):
+        return "key rejected"
+    return f"error {r.status_code}"
 
 
 def list_gemini_models(key: str) -> list[str]:
