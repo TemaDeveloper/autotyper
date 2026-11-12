@@ -82,6 +82,8 @@ def _settings(args) -> Settings:
         s.repair = False
     if getattr(args, "reformat", False):
         s.reformat = True
+    if getattr(args, "no_hud", False):
+        s.hud = False
     return s
 
 
@@ -216,9 +218,14 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
         )
         monitor = NullMonitor()
 
+    from .platform.hud import HudClient
+
+    hud = HudClient() if settings.hud else None
     status_line = {"msg": ""}
 
     def on_status(state: str, msg: str) -> None:
+        if hud:
+            hud.update(state=state, msg=msg)
         style = {"waiting": "yellow", "typing": "green", "info": "cyan"}.get(state, "white")
         icon = {"waiting": "⏸", "typing": "▶", "info": "•"}.get(state, "•")
         if msg != status_line["msg"]:
@@ -241,6 +248,8 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
             progress["path"] = path
             progress["n"] += 1
             console.print(f"[green]⌨  [{progress['n']}/{len(files)}] {Path(path).relative_to(root)}[/] ({total} lines)")
+        if hud:
+            hud.update(file=Path(path).name, index=progress["n"], count=len(files), line=line, total=total)
 
     engine = TypingEngine(macos.MacKeyboard(), macos.MacClipboard(), opener, gate, settings, on_progress=on_progress)
 
@@ -257,10 +266,17 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
             results.append(engine.type_file(str(root / f.path), f.content))
     except (Aborted, KeyboardInterrupt):
         console.print("[red]Stopped.[/] Run [bold]autotyper type[/] to continue where it left off.")
+        if hud:
+            hud.update(state="stopped", msg="Run autotyper type to continue")
+            hud.close(linger=2.0)
         return 130
     finally:
         if hasattr(monitor, "stop"):
             monitor.stop()
+    if hud:
+        bad = sum(r.status == "mismatch" for r in results)
+        hud.update(state="done", msg=f"{len(results)} file(s) written" + (f", {bad} to check" if bad else ""))
+        hud.close(linger=4.0)
 
     t = Table(title="Done", header_style="bold")
     t.add_column("File")
@@ -589,6 +605,7 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--instant", action="store_true", help="paste each file instead of typing it")
         g.add_argument("--no-repair", action="store_true", help="don't paste the exact file if typing went wrong")
         g.add_argument("--reformat", action="store_true", help="run Reformat Code after each file")
+        g.add_argument("--no-hud", action="store_true", help="don't show the floating status overlay")
         g.add_argument("-y", "--yes", action="store_true", help="start typing without asking")
 
     st = sub.add_parser("setup", help="first-time setup: API key and macOS permissions")

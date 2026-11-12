@@ -46,6 +46,7 @@ class Settings:
     reformat: bool = False  # run IDE "Reformat Code" after each file
     exact_whitespace: bool = True  # if only indentation differs at the end, paste the exact target
     xml_attr_quotes: bool = True  # Android Studio inserts "" after = in XML attributes
+    hud: bool = True  # floating status overlay (visible, also on screen shares)
 
     # --- focus gate ---------------------------------------------------
     ide_bundle_ids: list[str] = field(
@@ -105,6 +106,7 @@ wpm = 110
 jitter = 0.35
 repair = true
 reformat = false
+hud = true          # floating status overlay
 
 [focus]
 resume_idle = 1.2

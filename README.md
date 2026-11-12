@@ -115,6 +115,18 @@ Tasks can be text, PDF, screenshots (PNG/JPG), Markdown or a saved web page.
 | Press **Ctrl+Option+Cmd+P** | Pauses / resumes |
 | Press **Ctrl+Option+Cmd+X** (or Ctrl+C in the terminal) | Stops |
 
+A small **status overlay** floats in the top-right corner while it types: the current file, a progress bar, and whether typing is running or paused (and why). It follows you to other desktops, never takes clicks or focus, and shows up in screenshots and screen recordings like any other window. Preview it with `python -m autotyper.platform.hud --demo`, or turn it off with `--no-hud`.
+
+```text
+╭───────────────────────────────────────────────╮
+│ ❚❚  Paused                          autotyper │
+│ Firefox is in front - come back to Android…   │
+│ MainActivity.kt  ·  file 2/3  ·  line 30/64   │
+│ ██████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+│ ⌃⌥⌘P pause/resume   ⌃⌥⌘X stop                 │
+╰───────────────────────────────────────────────╯
+```
+
 **5. When it's done** you get a table of files and any next steps, such as "Sync Gradle" or "Run the app". Build and run the app to check it.
 
 Stopped halfway, or want to watch it again? Saved solutions replay without calling Claude again:
@@ -146,6 +158,7 @@ Useful options for `solve` and `type`:
 | `--plan-only` | Write and save the solution but don't type it |
 | `--project DIR` | Android project folder, if you're not in it |
 | `-y` | Start typing without asking |
+| `--no-hud` | Don't show the floating status overlay |
 | `--no-review` | Skip the final review pass (faster, cheaper) |
 
 ## How it works
@@ -195,6 +208,7 @@ review = true
 wpm = 110          # typing speed
 instant = false    # true = paste instead of type
 repair = true      # paste the exact file if typing went wrong
+hud = true         # floating status overlay
 
 [focus]
 resume_idle = 1.2  # seconds you must be idle before typing resumes
@@ -259,7 +273,9 @@ src/autotyper/
 ├── solution.py          plan/files and saved sessions
 ├── llm/                 planner → writers → reviewer pipeline and prompts
 ├── typer/               typing engine, pause rules, simulated editor for tests
-└── platform/macos.py    keystrokes, clipboard, window focus, hotkeys
+└── platform/
+    ├── macos.py         keystrokes, clipboard, window focus, hotkeys
+    └── hud.py           floating status overlay (runs as its own process)
 ```
 
 The tests drive the typing engine against `typer/fake_editor.py`, a simulated JetBrains editor with auto-brackets, auto-indent and completion popups, so they never touch your real keyboard.
