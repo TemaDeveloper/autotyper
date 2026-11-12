@@ -28,7 +28,7 @@ Every solution also comes with an **EXPLANATION.md**: a plain-language walkthrou
 |---|---|
 | **A Mac** | Typing uses macOS features. Other systems can generate the code but not type it. |
 | **Android Studio** | Any recent version, with its default keyboard shortcuts. |
-| **An Anthropic API key** | Get one at [console.anthropic.com](https://console.anthropic.com/settings/keys). Each task costs a few cents to a few dollars, depending on size. |
+| **A Claude Console account** | Free to create at [platform.claude.com](https://platform.claude.com) (Google sign-in works). You sign in with your browser, no key needed. Usage is paid from the account's API credits: a few cents to a few dollars per task. A claude.ai Pro/Max chat subscription can't be used by third-party tools. |
 | **Python 3.10+** | Already on most Macs. Check with `python3 --version`. |
 
 ## Install
@@ -61,7 +61,7 @@ autotyper setup
 
 It walks you through four steps and opens the right settings for you:
 
-1. **API key.** Paste it when asked. It is stored only on your Mac, in `~/.config/autotyper/credentials`, readable only by you.
+1. **Connect to Claude.** Choose **Sign in with your browser**. Your browser opens, you sign in with Google (or email), and you're connected. The first time, setup offers to install Anthropic's small `ant` sign-in tool with Homebrew. Prefer a key? Choose **Paste an API key**. It's stored only on your Mac, readable only by you.
 2. **Android Studio.** Checks that it's installed.
 3. **Accessibility permission** (required). Lets autotyper press keys. Turn it on for your terminal app (Terminal, iTerm, Warp…).
 4. **Input Monitoring permission** (recommended). Lets autotyper notice when *you* start typing, so it can step aside, and enables the pause/stop hotkeys.
@@ -143,6 +143,7 @@ That types the newest solution. Use `autotyper sessions` to list all of them.
 |---|---|
 | `autotyper` | Welcome screen: what's ready, what to do next |
 | `autotyper setup` | Guided first-time setup |
+| `autotyper login` | Connect to Claude: browser sign-in (Google/email) or API key |
 | `autotyper solve [task or files]` | Write the solution and type it |
 | `autotyper type [session]` | Type a saved solution again (no API cost) |
 | `autotyper sessions` | List saved solutions for this project |
@@ -219,12 +220,13 @@ goto_line = "cmd+l"
 select_to_doc_end = "cmd+shift+end"
 ```
 
-Your API key can also come from the `ANTHROPIC_API_KEY` environment variable or `ant auth login` instead of the saved key.
+Connection order: the `ANTHROPIC_API_KEY` environment variable, then a key saved by `autotyper login`, then your browser sign-in. Run `autotyper login --again` to switch accounts.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
+| "isn't connected to Claude" | Run `autotyper login` and sign in with your browser. If a sign-in stops working after a while, run `autotyper login --again`. |
 | `command not found: autotyper` | Open a new terminal window. With pipx, run `pipx ensurepath` once. |
 | "needs the Accessibility permission" even after allowing it | Quit and reopen your terminal app, then retry. |
 | Wrong characters typed (e.g. Cyrillic) | Switch the keyboard layout to ABC or US while typing. `autotyper doctor` shows the current one. |
@@ -266,7 +268,7 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 ```text
 src/autotyper/
 ├── cli.py               commands, setup wizard, prompts
-├── credentials.py       API key lookup and private storage
+├── credentials.py       Claude sign-in / API key lookup and private storage
 ├── config.py            settings and config file
 ├── project_context.py   reads the Android project for context
 ├── task_input.py        reads text, PDF, images, HTML, clipboard

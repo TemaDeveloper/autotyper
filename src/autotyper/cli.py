@@ -15,6 +15,7 @@ import asyncio
 import getpass
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +26,7 @@ from rich.table import Table
 
 from . import __version__
 from .config import CONFIG_PATH, SAMPLE_CONFIG, Settings, load_settings
-from .credentials import credential_source, looks_like_api_key, save_api_key
+from .credentials import ant_cli, credential_source, looks_like_api_key, save_api_key
 from .project_context import ProjectError, find_project_root, scan_project
 from .solution import Solution, new_session_dir
 from .task_input import TaskInputError, load_task, read_macos_clipboard
@@ -35,11 +36,12 @@ console = Console()
 HOTKEYS = "[bold]Ctrl+Option+Cmd+P[/] pause/resume · [bold]Ctrl+Option+Cmd+X[/] (or Ctrl+C here) stop"
 PANE_ACCESSIBILITY = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
 PANE_INPUT_MONITORING = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
-KEY_URL = "https://console.anthropic.com/settings/keys"
+KEY_URL = "https://platform.claude.com/settings/keys"
 
 EXAMPLES = """\
 examples:
   autotyper setup                                   first-time setup (once)
+  autotyper login                                   sign in to Claude with your browser
   autotyper solve                                   asks you for the task
   autotyper solve "Add a dark-mode switch to Settings"
   autotyper solve task.pdf screenshot.png           task from files
@@ -140,6 +142,51 @@ def _print_plan(sol: Solution, issues: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------- setup steps
+def _browser_sign_in() -> bool:
+    """Sign in through the browser with Anthropic's `ant` tool. Returns True when signed in."""
+    if not ant_cli():
+        if not shutil.which("brew"):
+            console.print(
+                "Browser sign-in uses Anthropic's [bold]ant[/] tool, which installs with Homebrew.\n"
+                "Install Homebrew from https://brew.sh, or choose the API key option instead."
+            )
+            return False
+        console.print("Browser sign-in uses Anthropic's free [bold]ant[/] tool. It installs with Homebrew:")
+        console.print("  [dim]brew install anthropics/tap/ant[/]")
+        if not _confirm("Install it now?", default=True):
+            return False
+        if subprocess.run(["brew", "install", "anthropics/tap/ant"], check=False).returncode != 0 or not ant_cli():
+            console.print("[red]Installing ant didn't work.[/] Try the command above yourself, or use an API key.")
+            return False
+    console.print(
+        "Your browser will open. Sign in to the Claude Console (Google sign-in works),\n"
+        "pick your organization, then come back here."
+    )
+    subprocess.run([ant_cli(), "auth", "login"], check=False)
+    if credential_source():
+        console.print(f"[green]✔ Signed in[/] ({credential_source()}).")
+        return True
+    console.print("[yellow]Sign-in didn't finish.[/] Run [bold]autotyper login[/] to try again.")
+    return False
+
+
+def _connect_claude() -> bool:
+    """Ask how to connect to Claude (browser sign-in or API key). Returns True when connected."""
+    console.print(
+        "autotyper needs access to Claude through your [bold]Claude Console[/] account\n"
+        "(platform.claude.com). Usage is billed to that account's API credits; a claude.ai\n"
+        "Pro/Max chat subscription can't be used by third-party tools."
+    )
+    console.print("  [bold cyan]1[/]  Sign in with your browser (Google or email) [dim]- recommended[/]")
+    console.print("  [bold cyan]2[/]  Paste an API key")
+    choice = console.input("Choose [bold]1[/] or [bold]2[/] (Enter = 1, s = skip): ").strip().lower()
+    if choice == "s":
+        return False
+    if choice == "2":
+        return _ask_api_key()
+    return _browser_sign_in()
+
+
 def _ask_api_key() -> bool:
     """Prompt for an API key and save it. Returns True if one was saved."""
     console.print(
@@ -348,10 +395,10 @@ def _prompt_task() -> tuple[str | None, list[str], bool]:
 def _ensure_credentials() -> bool:
     if credential_source():
         return True
-    console.print("[yellow]No Anthropic API key yet.[/]")
-    if _interactive() and _ask_api_key():
+    console.print("[yellow]autotyper isn't connected to Claude yet.[/]")
+    if _interactive() and _connect_claude():
         return True
-    console.print("Run [bold]autotyper setup[/] to add your key.")
+    console.print("Run [bold]autotyper login[/] to connect.")
     return False
 
 
@@ -368,7 +415,7 @@ def cmd_welcome(args) -> int:
         from .platform import macos
 
         checks = [
-            ("Anthropic API key", bool(credential_source())),
+            ("Connected to Claude", bool(credential_source())),
             ("Accessibility permission", macos.accessibility_trusted()),
             ("Android Studio installed", bool(macos.find_ide_app(load_settings().ide_bundle_ids, load_settings().ide_app_path))),
         ]
@@ -390,12 +437,12 @@ def cmd_setup(args) -> int:
     settings = load_settings()
     all_ok = True
 
-    console.print("\n[bold]Step 1 of 4 · Claude API key[/]")
+    console.print("\n[bold]Step 1 of 4 · Connect to Claude[/]")
     src = credential_source()
     if src:
-        console.print(f"[green]✔[/] Found ({src}).")
-    elif not _ask_api_key():
-        console.print("[yellow]Skipped.[/] You'll be asked again when you run autotyper solve.")
+        console.print(f"[green]✔[/] Connected ({src}).")
+    elif not _connect_claude():
+        console.print("[yellow]Not connected yet.[/] Run [bold]autotyper login[/] any time.")
         all_ok = False
 
     if sys.platform == "darwin":
@@ -442,6 +489,14 @@ def cmd_setup(args) -> int:
         return 0
     console.print("\n[yellow]Almost there.[/] Fix the items above, then run [bold]autotyper setup[/] again.")
     return 1
+
+
+def cmd_login(args) -> int:
+    src = credential_source()
+    if src and not args.again:
+        console.print(f"[green]✔ Already connected[/] ({src}). Use [bold]autotyper login --again[/] to switch account.")
+        return 0
+    return 0 if _connect_claude() else 1
 
 
 def cmd_solve(args) -> int:
@@ -552,7 +607,7 @@ def cmd_doctor(args) -> int:
     row(sys.platform == "darwin", "macOS", sys.platform)
     row(sys.version_info >= (3, 10), "Python", sys.version.split()[0])
     src = credential_source()
-    row(True if src else False, "Anthropic API key", src or "missing - run autotyper setup")
+    row(True if src else False, "Connected to Claude", src or "no - run autotyper login")
     row(None if not CONFIG_PATH.exists() else True, "Settings file",
         str(CONFIG_PATH) if CONFIG_PATH.exists() else "using defaults (autotyper setup --write-config creates one)")
     console.print(f"  models: planner [bold]{settings.orchestrator_model}[/] @ {settings.orchestrator_effort}, "
@@ -608,9 +663,13 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--no-hud", action="store_true", help="don't show the floating status overlay")
         g.add_argument("-y", "--yes", action="store_true", help="start typing without asking")
 
-    st = sub.add_parser("setup", help="first-time setup: API key and macOS permissions")
+    st = sub.add_parser("setup", help="first-time setup: Claude sign-in and macOS permissions")
     st.add_argument("--write-config", action="store_true", help="also create a settings file to customise")
     st.set_defaults(func=cmd_setup)
+
+    lg = sub.add_parser("login", help="connect to Claude: browser sign-in or API key")
+    lg.add_argument("--again", action="store_true", help="sign in again, e.g. with another account")
+    lg.set_defaults(func=cmd_login)
 
     s = sub.add_parser(
         "solve", help="solve a task and type it into Android Studio",

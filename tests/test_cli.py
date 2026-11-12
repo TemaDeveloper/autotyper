@@ -64,3 +64,24 @@ def test_type_without_sessions_is_friendly(tmp_path, capsys):
     code = cli.main(["type", "--project", str(tmp_path)])
     assert code == 2
     assert "autotyper solve" in capsys.readouterr().out
+
+
+def test_browser_sign_in_profile_detected(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_CONFIG_DIR", str(tmp_path))
+    monkeypatch.delenv("ANTHROPIC_PROFILE", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(credentials, "CREDENTIALS_PATH", tmp_path / "none")
+    assert credentials.credential_source() is None
+    (tmp_path / "credentials").mkdir()
+    (tmp_path / "credentials" / "work.json").write_text("{}")
+    (tmp_path / "active_config").write_text("work\n")
+    assert credentials.signed_in_profile() == "work"
+    assert "browser sign-in" in credentials.credential_source()
+    assert credentials.client_kwargs() == {}  # bare client -> SDK uses the profile
+
+
+def test_login_when_already_connected(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "credential_source", lambda: "browser sign-in (profile default)")
+    assert cli.main(["login"]) == 0
+    assert "Already connected" in capsys.readouterr().out

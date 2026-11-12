@@ -1,14 +1,15 @@
 """Anthropic API key lookup and storage.
 
 Order: ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN env vars, then the key saved
-by `autotyper setup` in ~/.config/autotyper/credentials (mode 0600), then the
-`ant` CLI login (picked up by the SDK itself).
+by `autotyper setup` in ~/.config/autotyper/credentials (mode 0600), then a
+browser sign-in made with `ant auth login` (the Anthropic SDK reads that
+profile from ~/.config/anthropic by itself).
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
+import shutil
 from pathlib import Path
 
 from .config import CONFIG_PATH
@@ -42,6 +43,26 @@ def looks_like_api_key(key: str) -> bool:
     return key.startswith("sk-ant-") and len(key) > 20 and not any(c.isspace() for c in key)
 
 
+def anthropic_config_dir() -> Path:
+    return Path(os.environ.get("ANTHROPIC_CONFIG_DIR", "~/.config/anthropic")).expanduser()
+
+
+def signed_in_profile() -> str | None:
+    """Name of the `ant auth login` profile the SDK will use, if it has credentials on disk."""
+    base = anthropic_config_dir()
+    name = os.environ.get("ANTHROPIC_PROFILE")
+    if not name:
+        try:
+            name = (base / "active_config").read_text(encoding="utf-8").strip() or "default"
+        except OSError:
+            name = "default"
+    return name if (base / "credentials" / f"{name}.json").is_file() else None
+
+
+def ant_cli() -> str | None:
+    return shutil.which("ant")
+
+
 def credential_source() -> str | None:
     """Where credentials come from, or None if there are none."""
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -49,12 +70,10 @@ def credential_source() -> str | None:
     if os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return "ANTHROPIC_AUTH_TOKEN"
     if saved_api_key():
-        return str(CREDENTIALS_PATH)
-    try:
-        if subprocess.run(["ant", "auth", "status"], capture_output=True, timeout=10).returncode == 0:
-            return "ant auth login"
-    except (OSError, subprocess.TimeoutExpired):
-        pass
+        return f"API key in {CREDENTIALS_PATH}"
+    profile = signed_in_profile()
+    if profile:
+        return f"browser sign-in (profile {profile})"
     return None
 
 
