@@ -81,7 +81,10 @@ def test_browser_sign_in_profile_detected(monkeypatch, tmp_path):
     assert credentials.client_kwargs() == {}  # bare client -> SDK uses the profile
 
 
-def test_login_when_already_connected(monkeypatch, capsys):
+def test_login_claude_when_already_connected(monkeypatch, capsys):
+    saved = {}
     monkeypatch.setattr(cli, "credential_source", lambda: "browser sign-in (profile default)")
-    assert cli.main(["login"]) == 0
-    assert "Already connected" in capsys.readouterr().out
+    monkeypatch.setattr(cli, "save_choices", lambda v: saved.update(v))
+    assert cli.main(["login", "claude"]) == 0
+    assert "Using Claude" in capsys.readouterr().out
+    assert saved == {"provider": "claude"}

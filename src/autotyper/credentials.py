@@ -83,3 +83,25 @@ def client_kwargs() -> dict:
         return {}
     key = saved_api_key()
     return {"api_key": key} if key else {}
+
+
+# ---------------------------------------------------------------------- free providers
+PROVIDER_KEY_ENV = {
+    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "openrouter": ("OPENROUTER_API_KEY",),
+}
+
+
+def provider_key_path(provider: str) -> Path:
+    return CREDENTIALS_PATH.parent / "keys" / provider
+
+
+def provider_key(provider: str) -> str | None:
+    for env in PROVIDER_KEY_ENV.get(provider, ()):
+        if os.environ.get(env):
+            return os.environ[env].strip()
+    return saved_api_key(provider_key_path(provider))
+
+
+def save_provider_key(provider: str, key: str) -> Path:
+    return save_api_key(key, provider_key_path(provider))

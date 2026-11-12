@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
-import tomllib
+import sys
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover
+    import tomli as tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -28,7 +34,14 @@ class Keymap:
 
 @dataclass
 class Settings:
-    # --- models -------------------------------------------------------
+    # --- AI provider -------------------------------------------------
+    provider: str = "claude"  # claude | ollama | gemini | openrouter
+    ollama_model: str = "qwen2.5-coder:14b"
+    ollama_url: str = "http://localhost:11434"
+    gemini_model: str = "gemini-flash-latest"
+    openrouter_model: str = ""  # picked from the current free models by `autotyper login`
+
+    # --- models (Claude) ----------------------------------------------
     orchestrator_model: str = "claude-opus-5-5"
     orchestrator_effort: str = "xhigh"
     worker_model: str = "claude-haiku-5-5"
@@ -69,8 +82,33 @@ class Settings:
         return 60.0 / (max(self.wpm, 1) * 5)
 
 
-def load_settings(path: Path = CONFIG_PATH) -> Settings:
+CHOICES_PATH = CONFIG_PATH.parent / "choices.toml"  # written by `autotyper login`
+
+
+def save_choices(values: dict[str, str], path: Path | None = None) -> None:
+    """Remember login choices (provider, model). config.toml still overrides them."""
+    p = path or CHOICES_PATH
+    current: dict = {}
+    if p.exists():
+        try:
+            current = tomllib.loads(p.read_text())
+        except tomllib.TOMLDecodeError:
+            current = {}
+    current.update(values)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# Written by `autotyper login`. Settings in config.toml take priority."]
+    lines += [f"{k} = {json.dumps(str(v))}" for k, v in current.items()]
+    p.write_text("\n".join(lines) + "\n")
+
+
+def load_settings(path: Path = CONFIG_PATH, choices: Path | None = None) -> Settings:
     s = Settings()
+    cp = choices or (CHOICES_PATH if path == CONFIG_PATH else path.parent / "choices.toml")
+    if cp.exists():
+        try:
+            apply_overrides(s, tomllib.loads(cp.read_text()))
+        except tomllib.TOMLDecodeError:
+            pass
     if path.exists():
         data = tomllib.loads(path.read_text())
         apply_overrides(s, data)
@@ -94,6 +132,8 @@ def apply_overrides(s: Settings, data: dict) -> Settings:
 
 SAMPLE_CONFIG = """\
 # ~/.config/autotyper/config.toml
+provider = "claude"   # claude | ollama | gemini | openrouter (autotyper login sets this)
+
 [models]
 orchestrator_model = "claude-opus-5-5"
 orchestrator_effort = "xhigh"

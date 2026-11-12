@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import json
 import os
 import shlex
 import shutil
@@ -24,9 +25,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from . import __version__
-from .config import CONFIG_PATH, SAMPLE_CONFIG, Settings, load_settings
-from .credentials import ant_cli, credential_source, looks_like_api_key, save_api_key
+from . import __version__, providers
+from .config import CONFIG_PATH, SAMPLE_CONFIG, Settings, load_settings, save_choices
+from .credentials import (
+    ant_cli, credential_source, looks_like_api_key, provider_key, save_api_key, save_provider_key,
+)
 from .project_context import ProjectError, find_project_root, scan_project
 from .solution import Solution, new_session_dir
 from .task_input import TaskInputError, load_task, read_macos_clipboard
@@ -41,7 +44,8 @@ KEY_URL = "https://platform.claude.com/settings/keys"
 EXAMPLES = """\
 examples:
   autotyper setup                                   first-time setup (once)
-  autotyper login                                   sign in to Claude with your browser
+  autotyper login                                   choose your AI (Claude or a free one)
+  autotyper solve --provider ollama "..."           use the free local AI this time
   autotyper solve                                   asks you for the task
   autotyper solve "Add a dark-mode switch to Settings"
   autotyper solve task.pdf screenshot.png           task from files
@@ -86,6 +90,13 @@ def _settings(args) -> Settings:
         s.reformat = True
     if getattr(args, "no_hud", False):
         s.hud = False
+    if getattr(args, "provider", None):
+        s.provider = args.provider
+    if getattr(args, "model", None):
+        if s.provider == "claude":
+            s.orchestrator_model = s.worker_model = args.model
+        else:
+            setattr(s, f"{s.provider}_model", args.model)
     return s
 
 
@@ -175,7 +186,8 @@ def _connect_claude() -> bool:
     console.print(
         "autotyper needs access to Claude through your [bold]Claude Console[/] account\n"
         "(platform.claude.com). Usage is billed to that account's API credits; a claude.ai\n"
-        "Pro/Max chat subscription can't be used by third-party tools."
+        "Pro/Max chat subscription can't be used by third-party tools. (No credits? Run\n"
+        "[bold]autotyper login[/] and pick a free AI instead.)"
     )
     console.print("  [bold cyan]1[/]  Sign in with your browser (Google or email) [dim]- recommended[/]")
     console.print("  [bold cyan]2[/]  Paste an API key")
@@ -392,20 +404,194 @@ def _prompt_task() -> tuple[str | None, list[str], bool]:
     return "\n".join(lines), [], False
 
 
-def _ensure_credentials() -> bool:
-    if credential_source():
-        return True
-    console.print("[yellow]autotyper isn't connected to Claude yet.[/]")
-    if _interactive() and _connect_claude():
-        return True
-    console.print("Run [bold]autotyper login[/] to connect.")
-    return False
+# ---------------------------------------------------------------------- AI providers
+def _choose_provider(current: str | None = None) -> str | None:
+    console.print("[bold]Which AI should write the code?[/]")
+    keys = list(providers.PROVIDERS)
+    for i, k in enumerate(keys, 1):
+        p = providers.PROVIDERS[k]
+        mark = "  [green](current)[/]" if k == current else ""
+        console.print(f"  [bold cyan]{i}[/]  {p.label:<24} [dim]{p.blurb}[/]{mark}")
+    default = keys.index(current) + 1 if current in keys else 1
+    raw = console.input(f"Choose 1-{len(keys)} (Enter = {default}): ").strip()
+    if not raw:
+        return keys[default - 1]
+    if raw.isdigit() and 1 <= int(raw) <= len(keys):
+        return keys[int(raw) - 1]
+    return raw if raw in keys else None
+
+
+def _setup_provider(name: str) -> bool:
+    """Interactive setup for one provider. On success it becomes the default."""
+    ok = {
+        "claude": _connect_claude,
+        "ollama": _setup_ollama,
+        "gemini": lambda: _setup_keyed("gemini"),
+        "openrouter": lambda: _setup_keyed("openrouter"),
+    }[name]()
+    if ok:
+        save_choices({"provider": name})
+        console.print(f"[green]✔ autotyper will use {providers.get(name).label}.[/] "
+                      "Change any time with [bold]autotyper login[/].")
+    return ok
+
+
+def _setup_ollama() -> bool:
+    url = load_settings().ollama_url
+    if not providers.ollama_installed():
+        console.print("Ollama runs free AI models on your Mac. It isn't installed yet.")
+        if shutil.which("brew") and _confirm("Install it with Homebrew (brew install ollama)?", default=True):
+            subprocess.run(["brew", "install", "ollama"], check=False)
+        else:
+            console.print("Download it from https://ollama.com/download, open it once, then run [bold]autotyper login[/] again.")
+            _open_url("https://ollama.com/download")
+            return False
+    if not providers.start_ollama(url):
+        console.print("[red]Ollama didn't start.[/] Open the Ollama app (or run [bold]ollama serve[/]) and try again.")
+        return False
+    have = providers.ollama_models(url)
+    console.print("[bold]Pick a model[/] (bigger = better code, slower, more disk and memory):")
+    for i, (tag, size, desc) in enumerate(providers.OLLAMA_CHOICES, 1):
+        got = "  [green]✔ downloaded[/]" if tag in have else ""
+        console.print(f"  [bold cyan]{i}[/]  {tag:<20} {size:>7}  [dim]{desc}[/]{got}")
+    console.print("  [dim]or type the name of any other Ollama model[/]")
+    raw = console.input("Choose (Enter = 2): ").strip()
+    if not raw:
+        model = providers.OLLAMA_CHOICES[1][0]
+    elif raw.isdigit() and 1 <= int(raw) <= len(providers.OLLAMA_CHOICES):
+        model = providers.OLLAMA_CHOICES[int(raw) - 1][0]
+    else:
+        model = raw
+    if not providers.ollama_has_model(url, model):
+        size = next((sz for t, sz, _ in providers.OLLAMA_CHOICES if t == model), "a few GB")
+        if not _confirm(f"Download {model} ({size}) now? It's a one-time download.", default=True):
+            return False
+        if not _ollama_pull(url, model):
+            return False
+    save_choices({"ollama_model": model})
+    console.print(f"[green]✔[/] {model} is ready. It runs fully on your Mac. "
+                  "[dim]Tip: quit the Android emulator while it writes, to free memory.[/]")
+    return True
+
+
+def _ollama_pull(url: str, model: str) -> bool:
+    import httpx
+    from rich.progress import BarColumn, DownloadColumn, Progress, TimeRemainingColumn
+
+    try:
+        with Progress("[progress.description]{task.description}", BarColumn(), DownloadColumn(),
+                      TimeRemainingColumn(), console=console) as prog:
+            task = prog.add_task(f"Downloading {model}", total=None)
+            with httpx.stream("POST", f"{url.rstrip('/')}/api/pull", json={"model": model, "stream": True},
+                              timeout=httpx.Timeout(None, connect=10.0)) as r:
+                for line in r.iter_lines():
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    if data.get("error"):
+                        console.print(f"[red]Download failed:[/] {data['error']}")
+                        return False
+                    if data.get("total"):
+                        prog.update(task, total=data["total"], completed=data.get("completed", 0))
+                    if data.get("status") == "success":
+                        return True
+    except httpx.HTTPError as e:
+        console.print(f"[red]Download failed:[/] {e}")
+        return False
+    return providers.ollama_has_model(url, model)
+
+
+def _setup_keyed(name: str) -> bool:
+    p = providers.get(name)
+    key = provider_key(name)
+    if key and _confirm(f"Use your saved {p.label} key?", default=True):
+        pass
+    else:
+        if name == "gemini":
+            console.print(
+                "Google gives free Gemini API keys. Sign in with your Google account and click "
+                "[bold]Create API key[/].\n[dim]On the free tier Google may use what you send "
+                "(your task and code) to improve its products.[/]"
+            )
+        else:
+            console.print("Create a free OpenRouter account (Google sign-in works) and click [bold]Create Key[/].")
+        console.print(f"Page: {p.key_url}")
+        if _confirm("Open it in your browser?", default=True):
+            _open_url(p.key_url)
+        key = getpass.getpass(f"Paste your {p.label} key (hidden), or Enter to cancel: ").strip()
+        if not key:
+            return False
+        if any(c.isspace() for c in key) or len(key) < 20:
+            console.print("[red]That doesn't look like an API key.[/]")
+            return False
+    try:
+        model = _pick_model_for(name, key)
+    except Exception as e:  # noqa: BLE001 - network/auth problems are reported, not raised
+        console.print(f"[red]Couldn't check the key with {p.label}:[/] {e}")
+        return False
+    if not model:
+        return False
+    save_provider_key(name, key)
+    save_choices({f"{name}_model": model})
+    console.print(f"[green]✔[/] Key saved (only your user can read it). Model: [bold]{model}[/]")
+    return True
+
+
+def _pick_model_for(name: str, key: str) -> str | None:
+    import httpx
+
+    if name == "gemini":
+        try:
+            ids = providers.list_gemini_models(key)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (400, 401, 403):
+                console.print("[red]Google rejected that key.[/] Copy it again from the page and retry.")
+                return None
+            raise
+        model = providers.pick_gemini_model(ids)
+        if not model:
+            console.print("[red]No suitable Gemini model is available for this key.[/]")
+        return model
+
+    r = httpx.get(f"{providers.get('openrouter').base_url}/key", headers={"Authorization": f"Bearer {key}"}, timeout=15.0)
+    if r.status_code in (401, 403):
+        console.print("[red]OpenRouter rejected that key.[/] Copy it again from the page and retry.")
+        return None
+    ranked = providers.rank_openrouter_free(providers.list_openrouter_models())[:6]
+    if not ranked:
+        console.print("[red]OpenRouter has no free models with a large enough context right now.[/]")
+        return None
+    console.print("[bold]Free models available right now[/] (best for coding first):")
+    for i, m in enumerate(ranked, 1):
+        console.print(f"  [bold cyan]{i}[/]  {m['id']}  [dim]{(m.get('context_length') or 0) // 1000}k context[/]")
+    raw = console.input("Choose (Enter = 1): ").strip()
+    idx = int(raw) - 1 if raw.isdigit() and 1 <= int(raw) <= len(ranked) else 0
+    return ranked[idx]["id"]
+
+
+def _ensure_ready(args) -> Settings | None:
+    """Settings for a provider that is ready to use, after offering to fix it; None if it isn't."""
+    settings = _settings(args)
+    if settings.provider == "ollama" and not providers.ollama_running(settings.ollama_url):
+        with console.status("Starting Ollama..."):
+            providers.start_ollama(settings.ollama_url)
+    ok, detail = providers.readiness(settings)
+    if ok:
+        return settings
+    label = providers.get(settings.provider).label
+    console.print(f"[yellow]{label} isn't ready:[/] {detail}")
+    if _interactive() and _setup_provider(settings.provider):
+        settings = _settings(args)
+        if providers.readiness(settings)[0]:
+            return settings
+    console.print("Run [bold]autotyper login[/] to set up an AI.")
+    return None
 
 
 # ---------------------------------------------------------------------- commands
 def cmd_welcome(args) -> int:
     console.print(Panel(
-        "Give it a coding task. Claude writes the solution for your Android project\n"
+        "Give it a coding task. AI writes the solution for your Android project\n"
         "and autotyper types it into Android Studio. Switch to another app or desktop\n"
         "and typing pauses. Come back and it continues.",
         title=f"autotyper {__version__}", border_style="cyan",
@@ -414,8 +600,10 @@ def cmd_welcome(args) -> int:
     if sys.platform == "darwin":
         from .platform import macos
 
+        s = load_settings()
+        ai_ok, ai_detail = providers.readiness(s)
         checks = [
-            ("Connected to Claude", bool(credential_source())),
+            (f"AI: {providers.get(s.provider).label} ({ai_detail})", ai_ok),
             ("Accessibility permission", macos.accessibility_trusted()),
             ("Android Studio installed", bool(macos.find_ide_app(load_settings().ide_bundle_ids, load_settings().ide_app_path))),
         ]
@@ -437,13 +625,16 @@ def cmd_setup(args) -> int:
     settings = load_settings()
     all_ok = True
 
-    console.print("\n[bold]Step 1 of 4 · Connect to Claude[/]")
-    src = credential_source()
-    if src:
-        console.print(f"[green]✔[/] Connected ({src}).")
-    elif not _connect_claude():
-        console.print("[yellow]Not connected yet.[/] Run [bold]autotyper login[/] any time.")
-        all_ok = False
+    console.print("\n[bold]Step 1 of 4 · Choose your AI[/]")
+    ai_ok, ai_detail = providers.readiness(settings)
+    if ai_ok:
+        console.print(f"[green]✔[/] {providers.get(settings.provider).label} ({ai_detail}). "
+                      "Change with [bold]autotyper login[/].")
+    else:
+        choice = _choose_provider(settings.provider)
+        if not (choice and _setup_provider(choice)):
+            console.print("[yellow]No AI set up yet.[/] Run [bold]autotyper login[/] any time.")
+            all_ok = False
 
     if sys.platform == "darwin":
         from .platform import macos
@@ -492,17 +683,29 @@ def cmd_setup(args) -> int:
 
 
 def cmd_login(args) -> int:
-    src = credential_source()
-    if src and not args.again:
-        console.print(f"[green]✔ Already connected[/] ({src}). Use [bold]autotyper login --again[/] to switch account.")
+    settings = load_settings()
+    name = args.provider_name
+    if not name:
+        if not _interactive():
+            ok, detail = providers.readiness(settings)
+            console.print(f"{providers.get(settings.provider).label}: {detail}")
+            return 0 if ok else 1
+        name = _choose_provider(settings.provider)
+        if not name:
+            console.print("[red]Unknown choice.[/]")
+            return 2
+    if name == "claude" and credential_source() and not args.again:
+        save_choices({"provider": "claude"})
+        console.print(f"[green]✔ Using Claude[/] ({credential_source()}). "
+                      "Use [bold]autotyper login claude --again[/] to switch account.")
         return 0
-    return 0 if _connect_claude() else 1
+    return 0 if _setup_provider(name) else 1
 
 
 def cmd_solve(args) -> int:
-    settings = _settings(args)
     root = _project_root(args)
-    if not _ensure_credentials():
+    settings = _ensure_ready(args)
+    if settings is None:
         return 4
 
     pos_files, pos_text = _split_positional(args.task_args or [])
@@ -516,15 +719,19 @@ def cmd_solve(args) -> int:
         else:
             stdin_text = sys.stdin.read()
     task = load_task(text=text, files=files, clipboard=use_clipboard, stdin_text=stdin_text)
-    ctx = scan_project(root)
+    prov = providers.get(settings.provider)
+    ctx = scan_project(root, budget_chars=prov.budget_chars)
     console.print(
         f"Project [bold]{root.name}[/] · {ctx.language} · {'Compose' if ctx.uses_compose else 'Views'} · "
         f"{len(ctx.files)} files read · task from {', '.join(task.sources)}"
     )
+    planner, _ = providers.models_for(settings)
+    console.print(f"AI: [bold]{prov.label}[/] · {planner}")
 
     from .llm.pipeline import Pipeline
 
-    with console.status("Thinking about the task... (usually 1-3 minutes)") as status:
+    wait = "usually 1-3 minutes" if prov.key != "ollama" else "on your Mac this can take 5-20 minutes"
+    with console.status(f"Thinking about the task... ({wait})") as status:
         pipe = Pipeline(settings, on_status=lambda m: status.update(m))
         solution, issues = asyncio.run(pipe.solve(task, ctx))
     session = solution.save(new_session_dir(root))
@@ -606,12 +813,12 @@ def cmd_doctor(args) -> int:
     settings = load_settings()
     row(sys.platform == "darwin", "macOS", sys.platform)
     row(sys.version_info >= (3, 10), "Python", sys.version.split()[0])
-    src = credential_source()
-    row(True if src else False, "Connected to Claude", src or "no - run autotyper login")
+    ai_ok, ai_detail = providers.readiness(settings)
+    row(ai_ok, f"AI: {providers.get(settings.provider).label}", ai_detail if ai_ok else ai_detail)
     row(None if not CONFIG_PATH.exists() else True, "Settings file",
         str(CONFIG_PATH) if CONFIG_PATH.exists() else "using defaults (autotyper setup --write-config creates one)")
-    console.print(f"  models: planner [bold]{settings.orchestrator_model}[/] @ {settings.orchestrator_effort}, "
-                  f"writers [bold]{settings.worker_model}[/]")
+    planner, writer = providers.models_for(settings)
+    console.print(f"  models: planner [bold]{planner}[/], writers [bold]{writer}[/]")
 
     if sys.platform == "darwin":
         from .platform import macos
@@ -667,8 +874,10 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--write-config", action="store_true", help="also create a settings file to customise")
     st.set_defaults(func=cmd_setup)
 
-    lg = sub.add_parser("login", help="connect to Claude: browser sign-in or API key")
-    lg.add_argument("--again", action="store_true", help="sign in again, e.g. with another account")
+    lg = sub.add_parser("login", help="choose and connect your AI: Claude, or free Ollama / Gemini / OpenRouter")
+    lg.add_argument("provider_name", nargs="?", choices=list(providers.PROVIDERS), metavar="AI",
+                    help="claude | ollama | gemini | openrouter (default: ask)")
+    lg.add_argument("--again", action="store_true", help="sign in to Claude again, e.g. with another account")
     lg.set_defaults(func=cmd_login)
 
     s = sub.add_parser(
@@ -682,7 +891,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--file", "-f", action="append", help="task file (repeatable)")
     s.add_argument("--clipboard", "-c", action="store_true", help="use the task you copied (text or screenshot)")
     s.add_argument("--plan-only", action="store_true", help="write and save the solution, don't type it")
-    a = s.add_argument_group("models")
+    a = s.add_argument_group("AI")
+    a.add_argument("--provider", choices=list(providers.PROVIDERS), help="AI to use this time (default: the one from autotyper login)")
+    a.add_argument("--model", help="model name for the chosen AI, e.g. qwen3-coder:30b")
     a.add_argument("--no-review", action="store_true", help="skip the final review pass (faster, cheaper)")
     a.add_argument("--orchestrator-model", metavar="MODEL", help="planner/reviewer model (default claude-opus-5-5)")
     a.add_argument("--worker-model", metavar="MODEL", help="file-writer model (default claude-haiku-5-5)")

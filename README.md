@@ -28,8 +28,19 @@ Every solution also comes with an **EXPLANATION.md**: a plain-language walkthrou
 |---|---|
 | **A Mac** | Typing uses macOS features. Other systems can generate the code but not type it. |
 | **Android Studio** | Any recent version, with its default keyboard shortcuts. |
-| **A Claude Console account** | Free to create at [platform.claude.com](https://platform.claude.com) (Google sign-in works). You sign in with your browser, no key needed. Usage is paid from the account's API credits: a few cents to a few dollars per task. A claude.ai Pro/Max chat subscription can't be used by third-party tools. |
+| **An AI to write the code** | Pick one during setup. See [Choose your AI](#choose-your-ai) below. Free options are available. |
 | **Python 3.10+** | Already on most Macs. Check with `python3 --version`. |
+
+## Choose your AI
+
+| AI | Cost | Quality | Good to know |
+|---|---|---|---|
+| **Claude** (Anthropic) | Paid from [Claude Console](https://platform.claude.com) API credits: cents to a few dollars per task | Best. Opus 5.5 plans and reviews, Haiku 5.5 writes the files | Sign in with your browser (Google works). A claude.ai Pro/Max/Ultra chat subscription doesn't cover the API, and third-party tools can't use it. |
+| **Ollama** (on your Mac) | **Free** | Good for small apps with the coder models | Runs offline, and your code never leaves your Mac. One-time download of 5–19 GB. Slower: 5–20 minutes per task. A 16 GB+ Apple Silicon Mac is recommended. |
+| **Google Gemini** | **Free tier** | Good | Free key from [Google AI Studio](https://aistudio.google.com/apikey). Daily limits apply. On the free tier, Google may use what you send to improve its products. |
+| **OpenRouter** free models | **Free** | Varies by model | Free key from [openrouter.ai](https://openrouter.ai/settings/keys). Rate limits apply, and the list of free models changes; setup shows what's free today. |
+
+Switch any time with `autotyper login`, or for one run with `autotyper solve --provider ollama "..."`.
 
 ## Install
 
@@ -61,7 +72,12 @@ autotyper setup
 
 It walks you through four steps and opens the right settings for you:
 
-1. **Connect to Claude.** Choose **Sign in with your browser**. Your browser opens, you sign in with Google (or email), and you're connected. The first time, setup offers to install Anthropic's small `ant` sign-in tool with Homebrew. Prefer a key? Choose **Paste an API key**. It's stored only on your Mac, readable only by you.
+1. **Choose your AI.** Pick one from the list:
+   - **Claude:** choose **Sign in with your browser** and sign in with Google (or email). The first time, setup offers to install Anthropic's small `ant` sign-in tool with Homebrew.
+   - **Ollama:** setup installs and starts Ollama if needed. Then pick a model size and it downloads it, once: `qwen2.5-coder:14b` (9 GB) is recommended, `qwen3-coder:30b` (19 GB) is best if you have 32 GB of RAM.
+   - **Gemini or OpenRouter:** setup opens the page for a free key. Paste the key, and setup checks it and picks a model.
+
+   Keys are stored only on your Mac, readable only by you.
 2. **Android Studio.** Checks that it's installed.
 3. **Accessibility permission** (required). Lets autotyper press keys. Turn it on for your terminal app (Terminal, iTerm, Warp…).
 4. **Input Monitoring permission** (recommended). Lets autotyper notice when *you* start typing, so it can step aside, and enables the pause/stop hotkeys.
@@ -143,7 +159,7 @@ That types the newest solution. Use `autotyper sessions` to list all of them.
 |---|---|
 | `autotyper` | Welcome screen: what's ready, what to do next |
 | `autotyper setup` | Guided first-time setup |
-| `autotyper login` | Connect to Claude: browser sign-in (Google/email) or API key |
+| `autotyper login [ai]` | Choose and connect your AI: `claude`, `ollama`, `gemini` or `openrouter` |
 | `autotyper solve [task or files]` | Write the solution and type it |
 | `autotyper type [session]` | Type a saved solution again (no API cost) |
 | `autotyper sessions` | List saved solutions for this project |
@@ -161,6 +177,8 @@ Useful options for `solve` and `type`:
 | `-y` | Start typing without asking |
 | `--no-hud` | Don't show the floating status overlay |
 | `--no-review` | Skip the final review pass (faster, cheaper) |
+| `--provider NAME` | Use a different AI this time: `claude`, `ollama`, `gemini`, `openrouter` |
+| `--model NAME` | Use a specific model of that AI, e.g. `--model qwen3-coder:30b` |
 
 ## How it works
 
@@ -184,6 +202,8 @@ Useful options for `solve` and `type`:
  typed into Android Studio
 ```
 
+With a free AI, one model plays all three roles. Because free models make more mistakes, autotyper also checks each file for obvious problems, such as a cut-off XML file or unbalanced `{ }`, and asks the model once more when it finds one.
+
 **Why typing into an IDE is tricky.** Android Studio "helps" while you type: it adds closing brackets and quotes, indents lines, and pops up suggestions. Typing code character by character would end up with doubled brackets and broken indentation. autotyper types one line at a time and clears whatever the editor added after the cursor before moving on. After each file it saves and compares the file on disk with the solution. If anything differs, it pastes the exact file, then puts back what was on your clipboard.
 
 **Why pausing is safe.** Every time typing pauses, autotyper re-reads the file, keeps every line that is already correct, and continues from the first wrong one. A stray click that moved the cursor can't scramble the file.
@@ -200,6 +220,8 @@ Then edit `~/.config/autotyper/config.toml`:
 
 ```toml
 [models]
+# provider = "ollama"                   # claude | ollama | gemini | openrouter (autotyper login sets it)
+# ollama_model = "qwen2.5-coder:14b"
 orchestrator_model = "claude-opus-5-5"   # planner and reviewer
 orchestrator_effort = "xhigh"            # low | medium | high | xhigh | max
 worker_model = "claude-haiku-5-5"        # file writers
@@ -226,6 +248,9 @@ Connection order: the `ANTHROPIC_API_KEY` environment variable, then a key saved
 
 | Problem | Fix |
 |---|---|
+| "credit balance is too low" (Claude) | Your Claude Console account needs API credits. A chat subscription doesn't include them. Add credits, or run `autotyper login` and pick a free AI. |
+| Free AI: "free-tier limit reached" | Wait a minute (or until tomorrow for daily limits), or switch with `autotyper login`. |
+| Ollama is slow or the Mac gets hot | Choose a smaller model with `autotyper login ollama`, and close the Android emulator while it writes. |
 | "isn't connected to Claude" | Run `autotyper login` and sign in with your browser. If a sign-in stops working after a while, run `autotyper login --again`. |
 | `command not found: autotyper` | Open a new terminal window. With pipx, run `pipx ensurepath` once. |
 | "needs the Accessibility permission" even after allowing it | Quit and reopen your terminal app, then retry. |
@@ -237,7 +262,7 @@ Connection order: the `ANTHROPIC_API_KEY` environment variable, then a key saved
 
 ## Privacy
 
-Sent to Anthropic's API: the task, plus a limited selection of your project's source, Gradle and resource files. **Never sent:** `local.properties`, `google-services.json`, keystores, and build/IDE folders. Everything else stays on your Mac. Solutions are saved in `.autotyper/` inside your project; add `.autotyper/` to `.gitignore` if you don't want them committed.
+Sent to the AI you chose (nothing at all with Ollama, which runs on your Mac): the task, plus a limited selection of your project's source, Gradle and resource files. **Never sent:** `local.properties`, `google-services.json`, keystores, and build/IDE folders. Everything else stays on your Mac. Solutions are saved in `.autotyper/` inside your project; add `.autotyper/` to `.gitignore` if you don't want them committed.
 
 ## Use it honestly
 
@@ -246,7 +271,7 @@ autotyper is a learning and demo tool: see how a task can be solved, read the ex
 ## Limits
 
 - **macOS only** for typing.
-- **Generated code can be wrong.** A model checks it, not a compiler. Build, run and read it.
+- **Generated code can be wrong,** more often with free models. A model checks it, not a compiler. Build, run and read it.
 - **Up to 20 files** per task. Split bigger tasks.
 - **Typing is human-paced on purpose.** Long files take a while; use `--instant` to paste.
 - **Early release.** The typing engine is tested against a simulated Android Studio editor. Real-IDE testing is ongoing, so please [open an issue](https://github.com/TemaDeveloper/autotyper/issues) if something misbehaves.
@@ -273,7 +298,8 @@ src/autotyper/
 ├── project_context.py   reads the Android project for context
 ├── task_input.py        reads text, PDF, images, HTML, clipboard
 ├── solution.py          plan/files and saved sessions
-├── llm/                 planner → writers → reviewer pipeline and prompts
+├── providers.py         Claude / Ollama / Gemini / OpenRouter setup and model picking
+├── llm/                 planner → writers → reviewer pipeline, prompts, AI backends
 ├── typer/               typing engine, pause rules, simulated editor for tests
 └── platform/
     ├── macos.py         keystrokes, clipboard, window focus, hotkeys
