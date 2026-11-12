@@ -252,6 +252,7 @@ Connection order: the `ANTHROPIC_API_KEY` environment variable, then a key saved
 | Free AI: "free-tier limit reached" | Wait a minute (or until tomorrow for daily limits), or switch with `autotyper login`. |
 | Ollama is slow or the Mac gets hot | Choose a smaller model with `autotyper login ollama`, and close the Android emulator while it writes. |
 | "isn't connected to Claude" | Run `autotyper login` and sign in with your browser. If a sign-in stops working after a while, run `autotyper login --again`. |
+| `ModuleNotFoundError` after updating | A new version added a dependency. Reinstall: `pipx install --force git+https://github.com/TemaDeveloper/autotyper.git` (or `pipx install --editable --force <folder>` for a local copy). |
 | `command not found: autotyper` | Open a new terminal window. With pipx, run `pipx ensurepath` once. |
 | "needs the Accessibility permission" even after allowing it | Quit and reopen your terminal app, then retry. |
 | Wrong characters typed (e.g. Cyrillic) | Switch the keyboard layout to ABC or US while typing. `autotyper doctor` shows the current one. |
