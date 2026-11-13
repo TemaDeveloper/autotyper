@@ -10,16 +10,22 @@ AppKit needs the main thread; the CLI sends it JSON lines on stdin:
 
     {"state": "typing", "msg": "...", "file": "A.kt", "index": 1, "count": 3, "line": 10, "total": 64}
 
-The process exits when stdin closes.
+The process exits when stdin closes (after an optional ``linger``), or when
+the CLI that started it is gone. It does not react to Ctrl+C in the
+terminal; the CLI decides when it closes.
 """
 
 from __future__ import annotations
 
+import atexit
 import json
+import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
+from typing import Callable, Iterable
 
 STATES = {
     # state: (icon, title, rgb)
@@ -74,6 +80,27 @@ class HudModel:
         return HudView(f"{icon}  {title}", rgb, self.msg, file_line, max(0.0, min(1.0, fraction)))
 
 
+MAX_LINGER = 30.0
+
+
+def pump(lines: Iterable[str], on_update: Callable[[dict], None]) -> float:
+    """Feed JSON status lines to ``on_update`` until EOF; return how long to linger before exiting."""
+    linger = 0.0
+    for raw in lines:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        try:
+            linger = float(data.get("linger", linger) or 0.0)
+        except (TypeError, ValueError):
+            pass
+        on_update(data)
+    return max(0.0, min(linger, MAX_LINGER))
+
+
 # ---------------------------------------------------------------------- client (CLI side)
 class HudClient:
     """Starts the overlay process and sends it updates. Every failure is silent: the HUD is optional."""
@@ -84,9 +111,12 @@ class HudClient:
             self.proc = subprocess.Popen(
                 [sys.executable, "-m", "autotyper.platform.hud"],
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True,
+                start_new_session=True,  # Ctrl+C in the terminal goes to the CLI only; the CLI closes the overlay
             )
         except OSError:
             self.proc = None
+        else:
+            atexit.register(self.close)  # whatever ends the CLI, don't leave the overlay behind
 
     def update(self, **fields) -> None:
         if not self.proc or self.proc.poll() is not None or not self.proc.stdin:
@@ -98,22 +128,43 @@ class HudClient:
             self.proc = None
 
     def close(self, linger: float = 0.0) -> None:
-        if not self.proc:
+        """Let the overlay show its last state for ``linger`` seconds, then make sure it is gone.
+
+        Safe to call more than once. A Ctrl+C while it lingers closes it right away.
+        """
+        proc, self.proc = self.proc, None
+        if not proc:
             return
         try:
-            if linger:
-                self.update(linger=linger)
-            self.proc.stdin.close()
-            self.proc.wait(timeout=linger + 3)
+            if proc.stdin and not proc.stdin.closed:
+                if linger:
+                    proc.stdin.write(json.dumps({"linger": linger}) + "\n")
+                    proc.stdin.flush()
+                proc.stdin.close()
+            proc.wait(timeout=linger + 3)
+        except KeyboardInterrupt:
+            _kill(proc)
         except (OSError, ValueError, subprocess.TimeoutExpired):
-            self.proc.kill()
-        self.proc = None
+            _kill(proc)
+
+
+def _kill(proc: subprocess.Popen) -> None:
+    try:
+        proc.kill()
+        proc.wait(timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 # ---------------------------------------------------------------------- overlay (its own process)
 def run() -> None:  # pragma: no cover - needs a GUI session
+    import signal
+
     import AppKit
     from PyObjCTools import AppHelper
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)  # the CLI decides when the overlay closes
+    parent = os.getppid()
 
     W, H, MARGIN = 360, 104, 16
     app = AppKit.NSApplication.sharedApplication()
@@ -190,18 +241,25 @@ def run() -> None:  # pragma: no cover - needs a GUI session
     render(model.view())
     panel.orderFrontRegardless()
 
+    # Exit from these threads with os._exit instead of asking the AppKit run loop to
+    # terminate: a delayed terminate_ can silently never fire, which left the
+    # overlay stuck on screen after the CLI was gone.
     def reader() -> None:
         linger = 0.0
-        for raw in sys.stdin:
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            linger = float(data.get("linger", linger) or 0.0)
-            AppHelper.callAfter(render, model.apply(data))
-        AppHelper.callLater(linger, app.terminate_, None)
+        try:
+            linger = pump(sys.stdin, lambda data: AppHelper.callAfter(render, model.apply(data)))
+        finally:
+            time.sleep(linger)
+            os._exit(0)
+
+    def watchdog() -> None:
+        while True:
+            time.sleep(1.0)
+            if os.getppid() != parent:  # the CLI died without closing us
+                os._exit(0)
 
     threading.Thread(target=reader, daemon=True).start()
+    threading.Thread(target=watchdog, daemon=True).start()
     AppHelper.runEventLoop(installInterrupt=True)
 
 

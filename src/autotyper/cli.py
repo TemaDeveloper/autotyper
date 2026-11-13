@@ -329,6 +329,10 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
             hud.update(state="stopped", msg="Run autotyper type to continue")
             hud.close(linger=2.0)
         return 130
+    except BaseException:
+        if hud:
+            hud.close()
+        raise
     finally:
         if hasattr(monitor, "stop"):
             monitor.stop()
