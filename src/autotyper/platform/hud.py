@@ -3,7 +3,7 @@
 A small translucent panel in the top-right corner that shows the current
 file, progress and whether typing is running or paused (and why). It never
 takes focus or mouse clicks, follows you across desktops (Spaces), and is
-an ordinary window as far as screenshots and screen sharing are concerned.
+hidden from screenshots and screen sharing.
 
 It runs in its own process (`python -m autotyper.platform.hud`) because
 AppKit needs the main thread; the CLI sends it JSON lines on stdin:
@@ -186,7 +186,7 @@ def run() -> None:  # pragma: no cover - needs a GUI session
     panel.setHasShadow_(True)
     panel.setIgnoresMouseEvents_(True)  # clicks go through to the window underneath
     panel.setHidesOnDeactivate_(False)
-    panel.setSharingType_(AppKit.NSWindowSharingReadOnly)  # normal window: visible in screenshots and shares
+    panel.setSharingType_(AppKit.NSWindowSharingNone)  # macOS hides this window from screen capture and sharing
     panel.setCollectionBehavior_(
         AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
         | AppKit.NSWindowCollectionBehaviorStationary

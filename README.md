@@ -131,7 +131,12 @@ Tasks can be text, PDF, screenshots (PNG/JPG), Markdown or a saved web page.
 | Press **Ctrl+Option+Cmd+P** | Pauses / resumes |
 | Press **Ctrl+Option+Cmd+X** (or Ctrl+C in the terminal) | Stops |
 
-A small **status overlay** floats in the top-right corner while it types: the current file, a progress bar, and whether typing is running or paused (and why). It follows you to other desktops, never takes clicks or focus, and shows up in screenshots and screen recordings like any other window. Preview it with `python -m autotyper.platform.hud --demo`, or turn it off with `--no-hud`.
+Typing is human-paced on purpose: the speed varies, it pauses a beat at word
+boundaries, and every so often it hits a neighbouring key, backs up and types
+the character again. Set the speed with `--wpm` and the mistake rate with
+`typo_rate` in the settings file (0 turns mistakes off).
+
+A small **status overlay** floats in the top-right corner while it types: the current file, a progress bar, and whether typing is running or paused (and why). It follows you to other desktops, never takes clicks or focus, and is hidden from screenshots and screen recordings. Preview it with `python -m autotyper.platform.hud --demo`, or turn it off with `--no-hud`.
 
 ```text
 ╭───────────────────────────────────────────────╮
@@ -229,9 +234,12 @@ review = true
 
 [typing]
 wpm = 110          # typing speed
+jitter = 0.35      # how much per-keystroke delay varies
+word_pause = 0.05  # extra pause after each space
+typo_rate = 0.015  # chance per character of a miskey, corrected right away (0 = never)
 instant = false    # true = paste instead of type
 repair = true      # paste the exact file if typing went wrong
-hud = true         # floating status overlay
+hud = true         # floating status overlay (hidden from screen sharing)
 
 [focus]
 resume_idle = 1.2  # seconds you must be idle before typing resumes

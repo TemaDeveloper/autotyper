@@ -33,6 +33,31 @@ from .gate import FocusGate
 
 _WS = re.compile(r"\s+")
 
+_QWERTY_ROWS = ("1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm")
+
+
+def plausible_typo(rng: random.Random, ch: str) -> str | None:
+    """Return a nearby QWERTY key for ``ch`` (a plausible miskey), or None.
+
+    Only letters and digits get a plausible neighbour - punctuation, quotes
+    and brackets are left alone because the IDE treats those specially.
+    """
+    if not ch.isascii() or not ch.isalnum():
+        return None
+    low = ch.lower()
+    for row in _QWERTY_ROWS:
+        i = row.find(low)
+        if i < 0:
+            continue
+        neighbours = []
+        if i > 0:
+            neighbours.append(row[i - 1])
+        if i < len(row) - 1:
+            neighbours.append(row[i + 1])
+        wrong = rng.choice(neighbours)
+        return wrong.upper() if ch.isupper() else wrong
+    return None
+
 
 def normalize(text: str) -> str:
     """Whitespace-insensitive form used for verification."""
@@ -141,6 +166,21 @@ class TypingEngine:
             j = self.s.jitter
             self.sleep(max(0.0, base * self.rng.uniform(1 - j, 1 + j)))
 
+    def _human_char(self, ch: str) -> None:
+        """Type ``ch`` the way a person would: occasional miskey, then fix it."""
+        if self.s.typo_rate > 0:
+            wrong = plausible_typo(self.rng, ch)
+            if wrong is not None and wrong != ch and self.rng.random() < self.s.typo_rate:
+                self._char(wrong)
+                # A beat to notice the mistake, then backspace and retype.
+                self.sleep(self.s.char_delay() * self.rng.uniform(0.5, 1.5))
+                self.kb.press("delete")
+                self.gate.mark_sent()
+                self.sleep(self.s.key_gap)
+        self._char(ch)
+        if ch == " " and self.s.word_pause:
+            self.sleep(self.s.word_pause * self.rng.uniform(0.5, 1.5))
+
     def _clear_after_caret(self) -> None:
         self._cmd("select_to_doc_end")
         self._cmd("delete_forward")
@@ -246,7 +286,7 @@ class TypingEngine:
                     break
                 if line_offsets[i] + col in skip:
                     continue
-                self._char(line[col])
+                self._human_char(line[col])
             if not restarted:
                 self._newline()
                 own_indent = False

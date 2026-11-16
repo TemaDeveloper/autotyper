@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from autotyper.config import Settings
-from autotyper.typer.engine import TypingEngine, normalize, xml_skip_quote_positions
+from autotyper.typer.engine import TypingEngine, normalize, plausible_typo, xml_skip_quote_positions
 from autotyper.typer.fake_editor import FakeJetBrainsEditor
 from autotyper.typer.gate import FocusGate, FocusState
 
@@ -177,3 +177,23 @@ def test_xml_skip_positions():
     t = '<a b="1" c=\'2\'>x="y"</a><!-- d="e" -->'
     pos = xml_skip_quote_positions(t)
     assert [t[i - 1 : i + 2] for i in sorted(pos)] == ['="1']
+
+
+def test_plausible_typo_is_a_neighbour_and_keeps_case():
+    import random
+
+    assert plausible_typo(random.Random(0), "a") in ("s", "q")
+    wrong = plausible_typo(random.Random(0), "K")
+    assert wrong in ("J", "L")
+    assert plausible_typo(random.Random(0), "{") is None
+    assert plausible_typo(random.Random(0), "5") in ("4", "6")
+
+
+def test_typos_are_backspaced_and_corrected(tmp_path):
+    s = Settings(typo_rate=1.0)
+    eng, ed, *_ = make(tmp_path, settings=s)
+    path = tmp_path / "MainActivity.kt"
+    out = eng.type_file(str(path), KOTLIN)
+    assert out.status == "typed", ed.text
+    assert normalize(path.read_text()) == normalize(KOTLIN)
+    assert ("press", "delete", ()) in ed.events

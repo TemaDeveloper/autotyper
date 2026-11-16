@@ -53,13 +53,15 @@ class Settings:
     wpm: int = 110  # 1 word = 5 chars
     jitter: float = 0.35  # +/- fraction of per-char delay
     line_pause: float = 0.12  # extra pause after each line, seconds
+    word_pause: float = 0.05  # extra pause after each space, seconds
+    typo_rate: float = 0.015  # chance per character of a plausible miskey, corrected right away
     key_gap: float = 0.03  # pause between keys of an editor command
     instant: bool = False  # paste whole files instead of typing
     repair: bool = True  # paste the exact target if the typed result differs
     reformat: bool = False  # run IDE "Reformat Code" after each file
     exact_whitespace: bool = True  # if only indentation differs at the end, paste the exact target
     xml_attr_quotes: bool = True  # Android Studio inserts "" after = in XML attributes
-    hud: bool = True  # floating status overlay (visible, also on screen shares)
+    hud: bool = True  # floating status overlay (hidden from screenshots and screen sharing)
 
     # --- focus gate ---------------------------------------------------
     ide_bundle_ids: list[str] = field(
@@ -144,9 +146,11 @@ review = true
 [typing]
 wpm = 110
 jitter = 0.35
+word_pause = 0.05   # extra pause after each space
+typo_rate = 0.015   # chance per character of a plausible miskey, corrected right away
 repair = true
 reformat = false
-hud = true          # floating status overlay
+hud = true          # floating status overlay (hidden from screen sharing)
 
 [focus]
 resume_idle = 1.2
