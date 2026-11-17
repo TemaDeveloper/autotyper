@@ -126,7 +126,7 @@ Tasks can be text, PDF, screenshots (PNG/JPG), Markdown or a saved web page.
 |---|---|
 | Switch to the browser or another app | Pauses |
 | Swipe to another desktop (Space) | Pauses |
-| Open a different file tab | Pauses, then reopens the right file after a few seconds |
+| Open a different file tab | Waits until you come back to the right file |
 | Type or click yourself | Pauses until you stop for about a second |
 | Come back to Android Studio | Checks the file, fixes anything that moved, continues |
 | Press **Ctrl+Option+Cmd+P** | Pauses / resumes |
@@ -258,11 +258,12 @@ repair = true        # paste the exact file if typing went wrong
 xml_attr_quotes = false  # only set true if your IDE inserts "" right after = in XML
 kotlin_only = true   # type only Kotlin source files and layout XML; skip values resources
 time_limit_minutes = 30  # pace the whole run to finish within this many minutes of actual typing
+silent_done = true  # finish quietly: no summary table, no next steps
 hud = false          # floating status overlay (opt-in; off by default)
 
 [focus]
 resume_idle = 1.2  # seconds you must be idle before typing resumes
-auto_refocus = true
+auto_refocus = false  # wait for you to return to the right file instead of reopening it
 
 [keymap]           # only if you changed Android Studio's shortcuts
 goto_line = "cmd+l"

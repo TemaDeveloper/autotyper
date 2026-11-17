@@ -402,8 +402,13 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
             monitor.stop()
     if hud:
         bad = sum(r.status == "mismatch" for r in results)
-        hud.update(state="done", msg=f"{len(results)} file(s) written" + (f", {bad} to check" if bad else ""))
-        hud.close(linger=4.0)
+        if not settings.silent_done:
+            hud.update(state="done", msg=f"{len(results)} file(s) written" + (f", {bad} to check" if bad else ""))
+        hud.close(linger=4.0 if not settings.silent_done else 0.0)
+
+    if settings.silent_done:
+        # Done silently: just stop typing. No summary, no next steps, no HUD.
+        return 0 if all(r.status != "mismatch" for r in results) else 1
 
     t = Table(title="Done", header_style="bold")
     t.add_column("File")

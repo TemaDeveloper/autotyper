@@ -77,6 +77,13 @@ def test_kotlin_only_is_the_default():
     assert Settings().time_limit_minutes == 30.0
 
 
+def test_silent_done_and_wait_for_file_are_defaults():
+    from autotyper.config import Settings
+
+    assert Settings().silent_done is True
+    assert Settings().auto_refocus is False
+
+
 def test_order_files_wraps_from_chosen_start():
     files = ["a.kt", "b.kt", "c.kt"]
     assert cli._order_files(files, "b.kt") == ["b.kt", "c.kt", "a.kt"]

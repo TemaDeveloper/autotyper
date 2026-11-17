@@ -71,6 +71,7 @@ class Settings:
     xml_attr_quotes: bool = False  # if your IDE auto-inserts "" after = in XML, set true to skip typing the opening quote
     kotlin_only: bool = True  # type only Kotlin + layout XML; skip values/resources (strings.xml, colors.xml, ...)
     time_limit_minutes: float = 30.0  # pace all files so typing finishes within this many minutes
+    silent_done: bool = True  # finish quietly: no summary table, no 'what to do next'
     hud: bool = False  # floating status overlay (opt-in; off by default so nothing shows on screen)
 
     # --- focus gate ---------------------------------------------------
@@ -84,7 +85,7 @@ class Settings:
     )
     ide_app_path: str | None = None  # auto-detected when empty
     resume_idle: float = 1.2  # seconds without your keyboard/mouse input before typing resumes
-    auto_refocus: bool = True  # reopen the target file if you sit idle on another tab
+    auto_refocus: bool = False  # wait for you to come back to the right file instead of reopening it
     refocus_after: float = 4.0
     poll_interval: float = 0.15
 
@@ -176,11 +177,12 @@ repair = true
 reformat = false
 kotlin_only = true   # type only Kotlin source files and layout XML; skip values resources
 time_limit_minutes = 30  # pace the whole run to finish within this many minutes
+silent_done = true  # finish quietly: no summary table, no next steps
 hud = false         # floating status overlay (opt-in; off by default)
 
 [focus]
 resume_idle = 1.2
-auto_refocus = true
+auto_refocus = false  # wait for you to return to the right file instead of reopening it
 
 [keymap]   # JetBrains macOS keymap defaults
 goto_line = "cmd+l"
