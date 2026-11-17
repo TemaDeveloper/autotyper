@@ -74,7 +74,7 @@ def test_kotlin_only_is_the_default():
     from autotyper.config import Settings
 
     assert Settings().kotlin_only is True
-    assert Settings().time_limit_minutes == 45.0
+    assert Settings().time_limit_minutes == 30.0
 
 
 def test_order_files_wraps_from_chosen_start():

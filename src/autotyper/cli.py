@@ -1022,7 +1022,7 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--hud", action="store_true", help="show the floating status overlay while typing")
         g.add_argument("--start", metavar="PATH", help="start typing with this file, then wrap around the rest")
         g.add_argument("--all-files", action="store_true", help="type every generated file, including values resources (default: Kotlin + layouts only)")
-        g.add_argument("--time-limit", metavar="MINUTES", type=float, help="pace the whole run to finish within this many minutes (default 45)")
+        g.add_argument("--time-limit", metavar="MINUTES", type=float, help="pace the whole run to finish within this many minutes of actual typing (default 30)")
         g.add_argument("-y", "--yes", action="store_true", help="start typing without asking")
 
     st = sub.add_parser("setup", help="first-time setup: Claude sign-in and macOS permissions")
