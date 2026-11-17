@@ -90,6 +90,8 @@ def _settings(args) -> Settings:
         s.reformat = True
     if getattr(args, "no_hud", False):
         s.hud = False
+    if getattr(args, "hud", False):
+        s.hud = True
     if getattr(args, "provider", None):
         s.provider = args.provider
     if getattr(args, "model", None):
@@ -917,7 +919,8 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--instant", action="store_true", help="paste each file instead of typing it")
         g.add_argument("--no-repair", action="store_true", help="don't paste the exact file if typing went wrong")
         g.add_argument("--reformat", action="store_true", help="run Reformat Code after each file")
-        g.add_argument("--no-hud", action="store_true", help="don't show the floating status overlay")
+        g.add_argument("--no-hud", action="store_true", help="don't show the floating status overlay (default)")
+        g.add_argument("--hud", action="store_true", help="show the floating status overlay while typing")
         g.add_argument("-y", "--yes", action="store_true", help="start typing without asking")
 
     st = sub.add_parser("setup", help="first-time setup: Claude sign-in and macOS permissions")

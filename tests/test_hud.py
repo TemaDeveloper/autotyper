@@ -27,9 +27,9 @@ def test_done_is_full_and_unknown_state_is_safe():
 def test_hud_setting_and_flag():
     from autotyper import cli
 
-    assert Settings().hud is True
-    args = cli.build_parser().parse_args(["type", "--no-hud"])
-    assert cli._settings(args).hud is False
+    assert Settings().hud is False
+    assert cli._settings(cli.build_parser().parse_args(["type", "--no-hud"])).hud is False
+    assert cli._settings(cli.build_parser().parse_args(["type", "--hud"])).hud is True
 
 
 def test_pump_reads_updates_and_returns_linger():

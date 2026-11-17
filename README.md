@@ -136,7 +136,7 @@ boundaries, and every so often it hits a neighbouring key, backs up and types
 the character again. Set the speed with `--wpm` and the mistake rate with
 `typo_rate` in the settings file (0 turns mistakes off).
 
-A small **status overlay** floats in the top-right corner while it types: the current file, a progress bar, and whether typing is running or paused (and why). It follows you to other desktops, never takes clicks or focus, and is hidden from screenshots and screen recordings. Preview it with `python -m autotyper.platform.hud --demo`, or turn it off with `--no-hud`.
+A small **status overlay** floats in the top-right corner while it types: the current file, a progress bar, and whether typing is running or paused (and why). It follows you to other desktops, never takes clicks or focus, and is hidden from screenshots and screen recordings. It's off by default — nothing shows on screen. Turn it on with `--hud`, preview it with `python -m autotyper.platform.hud --demo`, or set `hud = true` in the settings file.
 
 ```text
 ╭───────────────────────────────────────────────╮
@@ -180,7 +180,8 @@ Useful options for `solve` and `type`:
 | `--plan-only` | Write and save the solution but don't type it |
 | `--project DIR` | Android project folder, if you're not in it |
 | `-y` | Start typing without asking |
-| `--no-hud` | Don't show the floating status overlay |
+| `--no-hud` | Don't show the floating status overlay (the default) |
+| `--hud` | Show the floating status overlay while typing |
 | `--no-review` | Skip the final review pass (faster, cheaper) |
 | `--provider NAME` | Use a different AI this time: `claude`, `ollama`, `gemini`, `openrouter` |
 | `--model NAME` | Use a specific model of that AI, e.g. `--model qwen3-coder:30b` |
@@ -239,7 +240,7 @@ word_pause = 0.05  # extra pause after each space
 typo_rate = 0.015  # chance per character of a miskey, corrected right away (0 = never)
 instant = false    # true = paste instead of type
 repair = true      # paste the exact file if typing went wrong
-hud = true         # floating status overlay (hidden from screen sharing)
+hud = false        # floating status overlay (opt-in; off by default)
 
 [focus]
 resume_idle = 1.2  # seconds you must be idle before typing resumes
