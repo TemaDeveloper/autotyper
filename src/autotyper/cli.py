@@ -274,6 +274,22 @@ def _pick_start_file(files: list) -> list:
     return files[idx:] + files[:idx]
 
 
+def _should_type(path: str, kotlin_only: bool) -> bool:
+    """Decide which generated files are typed into the IDE.
+
+    When ``kotlin_only`` is on (the default), type Kotlin source files and XML
+    *layouts* (res/layout/*.xml). Skip values resources like strings.xml,
+    colors.xml, dimens.xml and styles.xml because their content is hardcoded
+    inline in the layouts and Kotlin.
+    """
+    if not kotlin_only:
+        return True
+    if path.endswith(".kt"):
+        return True
+    normalized = path.replace("\\", "/")
+    return "/layout/" in normalized and path.endswith(".xml")
+
+
 def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = None, start_path: str | None = None) -> int:
     if sys.platform != "darwin":
         console.print("[red]Typing works on macOS only.[/] The generated files are in the session folder.")
@@ -335,12 +351,12 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
     root = Path(sol.project_root)
     files = [f for f in sol.files if not only or f.path in only]
     if settings.kotlin_only and not only:
-        typed = [f for f in files if f.path.endswith((".kt", ".kts"))]
+        typed = [f for f in files if _should_type(f.path, True)]
         skipped = [f for f in files if f not in typed]
         files = typed
         if skipped:
             console.print(
-                f"[dim]Typing Kotlin only: skipping {len(skipped)} resource file(s) "
+                f"[dim]Typing Kotlin + layout XML only: skipping {len(skipped)} value/resource file(s) "
                 f"([bold]--all-files[/] types everything).[/]"
             )
     if not files:
@@ -1005,7 +1021,7 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--no-hud", action="store_true", help="don't show the floating status overlay (default)")
         g.add_argument("--hud", action="store_true", help="show the floating status overlay while typing")
         g.add_argument("--start", metavar="PATH", help="start typing with this file, then wrap around the rest")
-        g.add_argument("--all-files", action="store_true", help="type every generated file, including resources/XML (default: Kotlin only)")
+        g.add_argument("--all-files", action="store_true", help="type every generated file, including values resources (default: Kotlin + layouts only)")
         g.add_argument("--time-limit", metavar="MINUTES", type=float, help="pace the whole run to finish within this many minutes (default 45)")
         g.add_argument("-y", "--yes", action="store_true", help="start typing without asking")
 

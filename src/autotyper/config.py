@@ -69,7 +69,7 @@ class Settings:
     reformat: bool = False  # run IDE "Reformat Code" after each file
     exact_whitespace: bool = True  # if only indentation differs at the end, paste the exact target
     xml_attr_quotes: bool = False  # if your IDE auto-inserts "" after = in XML, set true to skip typing the opening quote
-    kotlin_only: bool = True  # type only Kotlin source files; skip resources/XML/etc.
+    kotlin_only: bool = True  # type only Kotlin + layout XML; skip values/resources (strings.xml, colors.xml, ...)
     time_limit_minutes: float = 45.0  # pace all files so typing finishes within this many minutes
     hud: bool = False  # floating status overlay (opt-in; off by default so nothing shows on screen)
 
@@ -174,7 +174,7 @@ block_rewrite_rate = 0.05 # chance per method/class/XML element of a quick in-pl
 format_rewrite_rate = 0.03 # chance per indented line of a mis-indent, corrected right away
 repair = true
 reformat = false
-kotlin_only = true   # type only Kotlin source files; skip resources/XML/etc.
+kotlin_only = true   # type only Kotlin source files and layout XML; skip values resources
 time_limit_minutes = 45  # pace the whole run to finish within this many minutes
 hud = false         # floating status overlay (opt-in; off by default)
 

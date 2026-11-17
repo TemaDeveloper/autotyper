@@ -84,6 +84,17 @@ def test_order_files_wraps_from_chosen_start():
     assert cli._order_files(files, "missing.kt") == files
 
 
+def test_should_type_skips_values_but_types_layouts():
+    assert cli._should_type("app/src/main/java/com/x/MainActivity.kt", True)
+    assert cli._should_type("app/src/main/java/com/x/MainActivity.kt", False)
+    assert cli._should_type("app/src/main/res/layout/activity_main.xml", True)
+    assert not cli._should_type("app/src/main/res/values/strings.xml", True)
+    assert not cli._should_type("app/src/main/res/values/colors.xml", True)
+    assert cli._should_type("app/src/main/res/values/strings.xml", False)
+    assert not cli._should_type("app/build.gradle.kts", True)  # config, not Kotlin source
+
+
+
 def test_type_without_sessions_is_friendly(tmp_path, capsys):
     (tmp_path / "settings.gradle.kts").write_text('include(":app")\n')
     code = cli.main(["type", "--project", str(tmp_path)])

@@ -8,6 +8,10 @@ Code rules (the code will be typed into Android Studio keystroke by keystroke):
 - Match the project: its language (Kotlin/Java), its package/namespace, its UI toolkit
   (Jetpack Compose vs XML views), its existing class/resource names and dependency versions.
 - Prefer the libraries the project already has. Add a dependency only when the task needs it.
+- Do NOT create or modify separate string/color/dimension resource files (strings.xml, colors.xml,
+  dimens.xml, styles.xml, themes.xml). Hardcode every label, hint, text and color inline: use
+  literal text in layout attributes and Kotlin string literals, and literal #RRGGBB colors. Layout
+  XML files (res/layout/*.xml) are expected; values resource files are not.
 """
 
 ORCHESTRATOR_SYSTEM = f"""\

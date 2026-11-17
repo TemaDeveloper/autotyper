@@ -184,7 +184,7 @@ Useful options for `solve` and `type`:
 | `--instant` | Paste each file instead of typing it (fast) |
 | `--wpm 60` | Typing speed in words per minute (default 40) |
 | `--start PATH` | Start typing with this file, then wrap around the rest |
-| `--all-files` | Type every generated file, including resources/XML (default: Kotlin only) |
+| `--all-files` | Type every generated file, including values resources (default: Kotlin + layouts only) |
 | `--time-limit 45` | Pace the whole run to finish within this many minutes (default 45) |
 | `--plan-only` | Write and save the solution but don't type it |
 | `--project DIR` | Android project folder, if you're not in it |
@@ -256,7 +256,7 @@ format_rewrite_rate = 0.03  # chance per indented line of a mis-indent, fixed ri
 instant = false      # true = paste instead of type
 repair = true        # paste the exact file if typing went wrong
 xml_attr_quotes = false  # only set true if your IDE inserts "" right after = in XML
-kotlin_only = true   # type only Kotlin source files; skip resources/XML/etc.
+kotlin_only = true   # type only Kotlin source files and layout XML; skip values resources
 time_limit_minutes = 45  # pace the whole run to finish within this many minutes
 hud = false          # floating status overlay (opt-in; off by default)
 
