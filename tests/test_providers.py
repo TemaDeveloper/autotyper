@@ -55,7 +55,7 @@ def test_openai_compat_downgrades_format_and_parses():
     assert seen == ["json_schema", "json_object"]
 
 
-def test_openai_compat_retries_rate_limit_then_explains():
+def test_openai_compat_rate_limit_without_fallback_fails_fast():
     waits = []
 
     async def fake_sleep(s):
@@ -65,6 +65,40 @@ def test_openai_compat_retries_rate_limit_then_explains():
                             http=httpx.AsyncClient(transport=httpx.MockTransport(
                                 lambda r: httpx.Response(429, headers={"retry-after": "3"}))))
     with pytest.raises(LLMError, match="free-tier limit"):
+        call(b)
+    assert waits == []  # a quota limit is never retried; it fails immediately
+
+
+def test_fallback_list_is_not_consumed_across_calls():
+    seen = []
+
+    def handler(req):
+        model = json.loads(req.content)["model"]
+        seen.append(model)
+        if model == "a":
+            return httpx.Response(429)
+        return sse('{"content": "x"}')
+
+    b = OpenAICompatBackend("gemini", "https://g.test", "k", fallback_models=["b"],
+                            http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    for _ in range(2):
+        assert run(b.complete(model="a", effort="high", system="s",
+                              content=[{"type": "text", "text": "t"}],
+                              schema=SCHEMA, max_tokens=10, label="t"))[0] == {"content": "x"}
+    # After the first successful switch, later calls start on the working model.
+    assert seen == ["a", "b", "b"]
+
+
+def test_openai_compat_retries_server_busy_then_explains():
+    waits = []
+
+    async def fake_sleep(s):
+        waits.append(s)
+
+    b = OpenAICompatBackend("openrouter", "https://o.test/v1", "k", sleep=fake_sleep, max_retries=2,
+                            http=httpx.AsyncClient(transport=httpx.MockTransport(
+                                lambda r: httpx.Response(503, headers={"retry-after": "3"}))))
+    with pytest.raises(LLMError, match="server error"):
         call(b)
     assert waits == [3.0, 3.0]
 

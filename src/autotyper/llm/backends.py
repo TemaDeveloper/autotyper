@@ -220,7 +220,7 @@ class OpenAICompatBackend:
 
     def __init__(self, name: str, base_url: str, api_key: str, http: httpx.AsyncClient | None = None,
                  sleep: Callable[[float], Any] = asyncio.sleep, max_retries: int = 4,
-                 fallback_models: list[str] | None = None, read_timeout: float = 180.0):
+                 fallback_models: list[str] | None = None, read_timeout: float = 60.0):
         self.name = name
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -241,9 +241,9 @@ class OpenAICompatBackend:
             return {"type": "json_object"}
         return None
 
-    def _switch_model(self, current: str, why: str) -> str | None:
-        while self.fallbacks:
-            nxt = self.fallbacks.pop(0)
+    def _switch_model(self, fallbacks: list[str], current: str, why: str) -> str | None:
+        while fallbacks:
+            nxt = fallbacks.pop(0)
             if nxt != current:
                 self.active_model = nxt
                 self.notice(f"{current} {why} - switching to {nxt}")
@@ -252,6 +252,9 @@ class OpenAICompatBackend:
 
     async def complete(self, *, model, effort, system, content, schema, max_tokens, label, progress=None):
         model = self.active_model or model
+        # Each call works through its own copy of the fallback list so parallel
+        # writers don't race each other for the shared list.
+        fallbacks = list(self.fallbacks)
         text, images = split_content(content)
         user_content: Any = text
         if images:
@@ -318,7 +321,7 @@ class OpenAICompatBackend:
                             if progress and parts and len(parts) % 20 == 0:
                                 progress(len(parts))
             except httpx.ReadTimeout:
-                nxt = self._switch_model(model, f"didn't answer for {int(self.read_timeout)}s")
+                nxt = self._switch_model(fallbacks, model, f"didn't answer for {int(self.read_timeout)}s")
                 if nxt:
                     model, attempt = nxt, 0
                     continue
@@ -329,30 +332,29 @@ class OpenAICompatBackend:
             except httpx.HTTPError as e:
                 raise LLMError(f"Network error talking to {self.name} during {label}: {e}") from e
 
-            if status == 429 or status >= 500:
-                # A 429 from the free tier means "no quota left" for *this model*.
-                # Retrying the same model just burns the 90s retry-after twice, so
-                # switch to the next fallback model straight away when one exists.
-                if status == 429 and self.fallbacks:
-                    nxt = self._switch_model(model, "is over its free limit")
-                    if nxt:
-                        model, attempt = nxt, 0
-                        continue
+            if status == 429:
+                # Free-tier quota is exhausted for this model. It won't recover in
+                # a few minutes, so switch models immediately or stop with a clear
+                # message - never burn the provider's 90s retry-after in a loop.
+                nxt = self._switch_model(fallbacks, model, "is over its free limit")
+                if nxt:
+                    model, attempt = nxt, 0
+                    continue
+                raise LLMError(
+                    f"{self.name} free-tier limit reached during {label}. Wait a minute (or until tomorrow "
+                    "for daily limits) and run `autotyper solve` again, or switch AI with `autotyper login`."
+                )
+            if status >= 500:
                 attempt += 1
                 give_up = 2 if self.fallbacks else self.max_retries
                 if attempt > give_up:
-                    nxt = self._switch_model(model, "is over its free limit" if status == 429 else "keeps failing")
+                    nxt = self._switch_model(fallbacks, model, "keeps failing")
                     if nxt:
                         model, attempt = nxt, 0
                         continue
-                    if status == 429:
-                        raise LLMError(
-                            f"{self.name} free-tier limit reached during {label}. Wait a minute (or until tomorrow "
-                            "for daily limits) and run `autotyper solve` again, or switch AI with `autotyper login`."
-                        )
                     raise LLMError(f"{self.name} server error during {label}: {status}")
-                wait = retry_after or min(60.0, 5.0 * 2 ** (attempt - 1))
-                self.notice(f"{self.name} {'rate limit' if status == 429 else 'server busy'} - "
+                wait = retry_after or min(30.0, 5.0 * 2 ** (attempt - 1))
+                self.notice(f"{self.name} server busy - "
                             f"waiting {int(wait)}s (retry {attempt}/{give_up})")
                 await self.sleep(wait)
                 continue
@@ -362,7 +364,7 @@ class OpenAICompatBackend:
             if status in (401, 403):
                 raise LLMError(f"{self.name} rejected the API key. Run `autotyper login` to set it again.")
             if status == 404:
-                nxt = self._switch_model(model, "isn't available")
+                nxt = self._switch_model(fallbacks, model, "isn't available")
                 if nxt:
                     model, attempt = nxt, 0
                     continue
