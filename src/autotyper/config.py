@@ -50,11 +50,16 @@ class Settings:
     max_parallel_workers: int = 4
 
     # --- typing -------------------------------------------------------
-    wpm: int = 110  # 1 word = 5 chars
-    jitter: float = 0.35  # +/- fraction of per-char delay
-    line_pause: float = 0.12  # extra pause after each line, seconds
-    word_pause: float = 0.05  # extra pause after each space, seconds
-    typo_rate: float = 0.015  # chance per character of a plausible miskey, corrected right away
+    wpm: int = 40  # 1 word = 5 chars
+    jitter: float = 0.45  # +/- fraction of per-char delay
+    line_pause: float = 0.5  # extra pause after each line, seconds
+    word_pause: float = 0.12  # extra pause after each space, seconds
+    hesitation: float = 0.03  # chance per character of a longer "thinking" pause
+    hesitation_pause: float = 0.9  # base length of that pause, seconds
+    typo_rate: float = 0.02  # chance per character of a single miskey, corrected right away
+    line_rewrite_rate: float = 0.02  # chance per line of deleting it and retyping it
+    block_rewrite_rate: float = 0.05  # chance per method/class/XML element of deleting and retyping it
+    format_rewrite_rate: float = 0.03  # chance per indented line of a mis-indent, corrected right away
     key_gap: float = 0.03  # pause between keys of an editor command
     instant: bool = False  # paste whole files instead of typing
     repair: bool = True  # paste the exact target if the typed result differs
@@ -144,10 +149,16 @@ worker_effort = "medium"
 review = true
 
 [typing]
-wpm = 110
-jitter = 0.35
-word_pause = 0.05   # extra pause after each space
-typo_rate = 0.015   # chance per character of a plausible miskey, corrected right away
+wpm = 40
+jitter = 0.45
+line_pause = 0.5
+word_pause = 0.12
+hesitation = 0.03
+hesitation_pause = 0.9
+typo_rate = 0.02        # chance per character of a miskey, corrected right away
+line_rewrite_rate = 0.02 # chance per line of deleting it and retyping it
+block_rewrite_rate = 0.05 # chance per method/class/XML element of deleting and retyping it
+format_rewrite_rate = 0.03 # chance per indented line of a mis-indent, corrected right away
 repair = true
 reformat = false
 hud = false         # floating status overlay (opt-in; off by default)

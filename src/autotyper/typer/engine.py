@@ -35,6 +35,12 @@ _WS = re.compile(r"\s+")
 
 _QWERTY_ROWS = ("1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm")
 
+_KOTLIN_DECL = re.compile(
+    r"^\s*(?:(?:public|private|protected|internal|override|suspend|open|abstract|final|inline|tailrec|data|sealed|enum|annotation|value|lateinit|const)\s+)*"
+    r"(fun|class|interface|object|init|companion object)\b"
+)
+_OPEN_TAG = re.compile(r"<\s*([A-Za-z_][\w.:-]*)")
+
 
 def plausible_typo(rng: random.Random, ch: str) -> str | None:
     """Return a nearby QWERTY key for ``ch`` (a plausible miskey), or None.
@@ -59,6 +65,121 @@ def plausible_typo(rng: random.Random, ch: str) -> str | None:
     return None
 
 
+def _brace_span(body: list[str], start: int) -> int:
+    """Line index of the ``}`` that closes the block starting at ``start``."""
+    depth = 0
+    saw_open = False
+    for j in range(start, len(body)):
+        for ch in body[j]:
+            if ch == "{":
+                depth += 1
+                saw_open = True
+            elif ch == "}":
+                depth -= 1
+        if saw_open and depth <= 0:
+            return j
+    return len(body) - 1 if saw_open else start
+
+
+def _xml_span(body: list[str], start: int) -> int:
+    """Line index where the XML element starting at ``start`` closes.
+
+    Scans tags character by character so opening tags that spread their
+    attributes over several lines (and end with ``/>``) are handled.
+    """
+    depth = 0
+    in_comment = False
+    in_tag = False
+    closing = False
+    self_closing = False
+    for j in range(start, len(body)):
+        line = body[j]
+        k = 0
+        while k < len(line):
+            if in_comment:
+                if line.startswith("-->", k):
+                    in_comment = False
+                    k += 3
+                else:
+                    k += 1
+                continue
+
+            if in_tag:
+                c = line[k]
+                if c == "/" and k + 1 < len(line) and line[k + 1] == ">":
+                    self_closing = True
+                elif c == ">":
+                    if closing or self_closing:
+                        depth -= 1
+                    in_tag = False
+                    closing = False
+                    self_closing = False
+                k += 1
+                continue
+
+            if line.startswith("<!--", k):
+                in_comment = True
+                k += 4
+                continue
+
+            c = line[k]
+            if c == "<":
+                if line.startswith("</", k):
+                    in_tag = True
+                    closing = True
+                    self_closing = False
+                    k += 2
+                elif line.startswith("<?", k) or line.startswith("<!", k):
+                    in_tag = True
+                    closing = False
+                    self_closing = False
+                    k += 2
+                else:
+                    depth += 1  # opening tag; self-closing cancels this at '>'
+                    in_tag = True
+                    closing = False
+                    self_closing = False
+                    k += 1
+                continue
+            k += 1
+
+        if depth <= 0 and j > start:
+            return j
+    return len(body) - 1
+
+
+def block_starts(body: list[str], is_xml: bool) -> dict[int, list[int]]:
+    """Map ``end_line -> [start_lines]`` of multi-line method/class/XML blocks.
+
+    Only multi-line blocks are returned; single lines fall back to the
+    ordinary line-rewrite mistake. A slightly imperfect span is harmless: the
+    block is always retyped from the exact target lines, so the file still ends
+    up correct.
+    """
+    ends: dict[int, list[int]] = {}
+    if is_xml:
+        for start, line in enumerate(body):
+            stripped = line.lstrip()
+            if not (stripped.startswith("<") and not stripped.startswith(("</", "<!--", "<?", "<!"))):
+                continue
+            m = _OPEN_TAG.match(stripped)
+            if m is None:
+                continue
+            # Skip tags that close on this same line (self-closing or <a></a>).
+            if "/>" in stripped or f"</{m.group(1)}" in stripped:
+                continue
+            end = _xml_span(body, start)
+            if end > start:
+                ends.setdefault(end, []).append(start)
+    else:
+        for start, line in enumerate(body):
+            if _KOTLIN_DECL.match(line):
+                end = _brace_span(body, start)
+                if end > start:
+                    ends.setdefault(end, []).append(start)
+    return ends
+
+
 def normalize(text: str) -> str:
     """Whitespace-insensitive form used for verification."""
     return _WS.sub("", text)
@@ -74,6 +195,7 @@ class FileOutcome:
     status: str  # "typed" | "repaired" | "mismatch" | "unchanged"
     lines: int
     resyncs: int
+    mistakes: int = 0
 
 
 def xml_skip_quote_positions(target: str) -> set[int]:
@@ -158,6 +280,12 @@ class TypingEngine:
     def _cmd(self, name: str) -> None:
         self._chord(getattr(self.s.keymap, name))
 
+    def _key(self, key: str, mods: tuple[str, ...] = ()) -> None:
+        self._ready(check_title=False)
+        self.kb.press(key, mods)
+        self.gate.mark_sent()
+        self.sleep(self.s.key_gap)
+
     def _char(self, ch: str, delay: bool = True) -> None:
         self.kb.type_char(ch)
         self.gate.mark_sent()
@@ -173,13 +301,45 @@ class TypingEngine:
             if wrong is not None and wrong != ch and self.rng.random() < self.s.typo_rate:
                 self._char(wrong)
                 # A beat to notice the mistake, then backspace and retype.
-                self.sleep(self.s.char_delay() * self.rng.uniform(0.5, 1.5))
-                self.kb.press("delete")
-                self.gate.mark_sent()
-                self.sleep(self.s.key_gap)
+                self.sleep(self.s.char_delay() * self.rng.uniform(0.4, 1.2))
+                self._key("delete")
         self._char(ch)
+        if self.s.hesitation > 0 and self.rng.random() < self.s.hesitation:
+            self.sleep(self.s.hesitation_pause * self.rng.uniform(0.5, 2.5))
         if ch == " " and self.s.word_pause:
-            self.sleep(self.s.word_pause * self.rng.uniform(0.5, 1.5))
+            self.sleep(self.s.word_pause * self.rng.uniform(0.5, 2.0))
+
+    def _format_slip(self, indent: int, own_indent: bool) -> int:
+        """Over-indent the line by one level, pause, then delete the extra spaces.
+
+        Leaves the caret where the line's content should start and returns the
+        column to start typing from (the correct indentation).
+        """
+        extra = 4
+        if not own_indent:
+            self._key("home")  # line start, before the IDE's auto-indent
+        for _ in range((indent if own_indent else 0) + extra):
+            self.kb.type_char(" ")
+            self.gate.mark_sent()
+            self.sleep(self.s.key_gap)
+        self.sleep(self.s.char_delay() * self.rng.uniform(0.5, 1.5))
+        for _ in range(extra):
+            self._key("delete")
+        if not own_indent:
+            self._key("end")  # back to after the auto-indent
+        return indent
+
+    def _delete_last_line(self) -> None:
+        """Delete the line above the caret (the one just typed), landing on it."""
+        self._key("up")
+        self._key("home")
+        self._key("end", ("shift",))
+        self._key("forward_delete")
+
+    def _delete_block(self, start_line: int) -> None:
+        """Delete everything from ``start_line`` to the end of the document."""
+        self._goto_line(start_line + 1)
+        self._clear_after_caret()
 
     def _clear_after_caret(self) -> None:
         self._cmd("select_to_doc_end")
@@ -262,7 +422,7 @@ class TypingEngine:
             return FileOutcome(path, "unchanged", len(body), 0)
 
         if self.s.instant:
-            return self._paste_file(path, target, len(body), resyncs=0, status="typed")
+            return self._paste_file(path, target, len(body), resyncs=0, status="typed", mistakes=0)
 
         is_xml = path.endswith(".xml") and self.s.xml_attr_quotes
         skip = xml_skip_quote_positions(target) if is_xml else set()
@@ -272,12 +432,24 @@ class TypingEngine:
             line_offsets.append(off)
             off += len(line) + 1
 
+        block_ends = block_starts(body, is_xml)
         resyncs = 0
+        mistakes = 0
+        rewritten_lines: set[int] = set()
+        rewritten_blocks: set[tuple[int, int]] = set()
         i, own_indent = self._sync(body)
         while i < len(body):
             line = body[i]
             self.on_progress(path, i + 1, len(body))
             start = 0 if own_indent else len(line) - len(line.lstrip(" "))
+
+            # Formatting mistake: over-indent the line, pause, then fix it.
+            if self.s.format_rewrite_rate > 0:
+                indent = len(line) - len(line.lstrip(" "))
+                if indent > 0 and self.rng.random() < self.s.format_rewrite_rate:
+                    start = self._format_slip(indent, own_indent)
+                    mistakes += 1
+
             restarted = False
             for col in range(start, len(line)):
                 self._ready(check_title=True)
@@ -287,15 +459,41 @@ class TypingEngine:
                 if line_offsets[i] + col in skip:
                     continue
                 self._human_char(line[col])
-            if not restarted:
-                self._newline()
-                own_indent = False
-                if self.s.line_pause:
-                    self.sleep(self.s.line_pause * self.rng.uniform(0.5, 1.5))
-                i += 1
-            if self._dirty or restarted:
+
+            if restarted or self._dirty:
                 resyncs += 1
                 i, own_indent = self._sync(body)
+                continue
+
+            self._newline()
+            if self.s.line_pause:
+                self.sleep(self.s.line_pause * self.rng.uniform(0.5, 2.0))
+
+            # Mistake: delete the whole line just typed and rewrite it.
+            if (
+                i not in rewritten_lines
+                and self.s.line_rewrite_rate > 0
+                and self.rng.random() < self.s.line_rewrite_rate
+            ):
+                rewritten_lines.add(i)
+                self._delete_last_line()
+                mistakes += 1
+                i, own_indent = i, True
+                continue
+
+            # Mistake: delete a whole method/class/XML element and rewrite it.
+            starts = block_ends.get(i)
+            if starts and self.s.block_rewrite_rate > 0:
+                start_i = max(starts)
+                if (start_i, i) not in rewritten_blocks and self.rng.random() < self.s.block_rewrite_rate:
+                    rewritten_blocks.add((start_i, i))
+                    self._delete_block(start_i)
+                    mistakes += 1
+                    i, own_indent = start_i, True
+                    continue
+
+            own_indent = False
+            i += 1
 
         if self.s.reformat:
             self._cmd("reformat")
@@ -305,13 +503,13 @@ class TypingEngine:
         if normalize(disk) == normalize(target):
             if self.s.exact_whitespace and _lines(disk) != _lines(target):
                 # Same code, IDE indented it differently: snap to the exact target.
-                return self._paste_file(path, target, len(body), resyncs, status="typed")
-            return FileOutcome(path, "typed", len(body), resyncs)
+                return self._paste_file(path, target, len(body), resyncs, status="typed", mistakes=mistakes)
+            return FileOutcome(path, "typed", len(body), resyncs, mistakes)
         if not self.s.repair:
-            return FileOutcome(path, "mismatch", len(body), resyncs)
-        return self._paste_file(path, target, len(body), resyncs, status="repaired")
+            return FileOutcome(path, "mismatch", len(body), resyncs, mistakes)
+        return self._paste_file(path, target, len(body), resyncs, status="repaired", mistakes=mistakes)
 
-    def _paste_file(self, path: str, target: str, lines: int, resyncs: int, status: str) -> FileOutcome:
+    def _paste_file(self, path: str, target: str, lines: int, resyncs: int, status: str, mistakes: int = 0) -> FileOutcome:
         snapshot = getattr(self.clipboard, "snapshot", None)
         saved = snapshot() if snapshot else self.clipboard.get_text()
         try:
@@ -329,4 +527,4 @@ class TypingEngine:
             else:
                 self.clipboard.set_text("", transient=True)  # don't leave the solution on the clipboard
         ok = normalize(self._read_disk()) == normalize(target)
-        return FileOutcome(path, status if ok else "mismatch", lines, resyncs)
+        return FileOutcome(path, status if ok else "mismatch", lines, resyncs, mistakes)

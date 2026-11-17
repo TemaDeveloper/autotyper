@@ -1,9 +1,16 @@
+import random
 from pathlib import Path
 
 import pytest
 
 from autotyper.config import Settings
-from autotyper.typer.engine import TypingEngine, normalize, plausible_typo, xml_skip_quote_positions
+from autotyper.typer.engine import (
+    TypingEngine,
+    block_starts,
+    normalize,
+    plausible_typo,
+    xml_skip_quote_positions,
+)
 from autotyper.typer.fake_editor import FakeJetBrainsEditor
 from autotyper.typer.gate import FocusGate, FocusState
 
@@ -99,7 +106,7 @@ def make(tmp_path, settings=None, probe=None, smart=None):
     mon = Monitor(clock)
     s = settings or Settings()
     gate = FocusGate(probe, mon, s.ide_bundle_ids, resume_idle=0.5, poll_interval=0.1, clock=clock, sleep=clock.sleep)
-    eng = TypingEngine(ed, ed, ed, gate, s, sleep=clock.sleep)
+    eng = TypingEngine(ed, ed, ed, gate, s, sleep=clock.sleep, rng=random.Random(0))
     return eng, ed, probe, mon, clock
 
 
@@ -197,3 +204,59 @@ def test_typos_are_backspaced_and_corrected(tmp_path):
     assert out.status == "typed", ed.text
     assert normalize(path.read_text()) == normalize(KOTLIN)
     assert ("press", "delete", ()) in ed.events
+
+
+def test_line_rewrite_deletes_and_retypes_the_line(tmp_path):
+    s = Settings(typo_rate=0, line_rewrite_rate=1.0, block_rewrite_rate=0, format_rewrite_rate=0)
+    eng, ed, *_ = make(tmp_path, settings=s)
+    path = tmp_path / "A.kt"
+    out = eng.type_file(str(path), KOTLIN)
+    assert out.status == "typed", ed.text
+    assert normalize(path.read_text()) == normalize(KOTLIN)
+    # up, home, shift+end, forward_delete happen at least once
+    assert ("press", "up", ()) in ed.events
+    assert ("press", "home", ()) in ed.events
+    assert ("press", "end", ("shift",)) in ed.events
+    assert out.mistakes >= 1
+
+
+def test_block_rewrite_rewrites_whole_method(tmp_path):
+    s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=1.0, format_rewrite_rate=0)
+    eng, ed, *_ = make(tmp_path, settings=s)
+    path = tmp_path / "MainActivity.kt"
+    out = eng.type_file(str(path), KOTLIN)
+    assert out.status == "typed", ed.text
+    assert normalize(path.read_text()) == normalize(KOTLIN)
+    assert out.mistakes >= 1
+
+
+def test_xml_block_rewrite_rewrites_whole_element(tmp_path):
+    s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=1.0, format_rewrite_rate=0)
+    eng, ed, *_ = make(tmp_path, settings=s)
+    path = tmp_path / "activity_main.xml"
+    out = eng.type_file(str(path), XML)
+    assert out.status == "typed", ed.text
+    assert normalize(path.read_text()) == normalize(XML)
+    assert out.mistakes >= 1
+
+
+def test_format_slip_overindents_then_fixes(tmp_path):
+    s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=0, format_rewrite_rate=1.0)
+    eng, ed, *_ = make(tmp_path, settings=s)
+    path = tmp_path / "MainActivity.kt"
+    out = eng.type_file(str(path), KOTLIN)
+    assert out.status == "typed", ed.text
+    assert normalize(path.read_text()) == normalize(KOTLIN)
+    assert out.mistakes >= 1
+
+
+def test_block_starts_finds_methods_classes_and_xml_elements():
+    kotlin = KOTLIN.split("\n")
+    ends = block_starts(kotlin, False)
+    # KOTLIN's class ends on the line whose stripped text is the final "}".
+    last_brace = max(i for i, line in enumerate(kotlin) if line.strip() == "}")
+    assert last_brace in ends
+
+    xml = XML.split("\n")
+    xends = block_starts(xml, True)
+    assert xends  # at least one multi-line XML element

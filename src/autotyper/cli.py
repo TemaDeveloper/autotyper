@@ -915,7 +915,7 @@ def build_parser() -> argparse.ArgumentParser:
     def typing_flags(sp):
         g = sp.add_argument_group("typing")
         g.add_argument("--project", metavar="DIR", help="Android project folder (default: this folder)")
-        g.add_argument("--wpm", type=int, help="typing speed in words per minute (default 110)")
+        g.add_argument("--wpm", type=int, help="typing speed in words per minute (default 40)")
         g.add_argument("--instant", action="store_true", help="paste each file instead of typing it")
         g.add_argument("--no-repair", action="store_true", help="don't paste the exact file if typing went wrong")
         g.add_argument("--reformat", action="store_true", help="run Reformat Code after each file")
