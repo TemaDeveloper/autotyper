@@ -51,7 +51,7 @@ class Settings:
 
     # --- typing -------------------------------------------------------
     wpm: int = 40  # 1 word = 5 chars
-    jitter: float = 0.45  # +/- fraction of per-char delay
+    jitter: float = 0.45  # log-normal spread of per-key delays (larger = more uneven)
     line_pause: float = 0.5  # extra pause after each line, seconds
     word_pause: float = 0.12  # extra pause after each space, seconds
     hesitation: float = 0.03  # chance per character of a longer "thinking" pause
@@ -150,7 +150,7 @@ review = true
 
 [typing]
 wpm = 40
-jitter = 0.45
+jitter = 0.45        # how much per-keystroke delay varies (log-normal spread)
 line_pause = 0.5
 word_pause = 0.12
 hesitation = 0.03

@@ -20,6 +20,7 @@ still differs, pastes the exact target as a repair.
 
 from __future__ import annotations
 
+import math
 import random
 import re
 import time
@@ -40,6 +41,9 @@ _KOTLIN_DECL = re.compile(
     r"(fun|class|interface|object|init|companion object)\b"
 )
 _OPEN_TAG = re.compile(r"<\s*([A-Za-z_][\w.:-]*)")
+
+# Characters after which a person naturally hesitates a beat while coding.
+_BOUNDARY_CHARS = {",", ";", "{", "}"}
 
 
 def plausible_typo(rng: random.Random, ch: str) -> str | None:
@@ -264,6 +268,10 @@ class TypingEngine:
         self.save_wait = save_wait
         self._path: str | None = None
         self._dirty = False  # a pause happened -> re-sync before typing more
+        # Human pacing state: typing comes in bursts whose speed drifts, so the
+        # intervals never settle into a metronome.
+        self._pace = 1.0  # >1 = slower, <1 = faster; drifts between bursts
+        self._burst_left = 0
 
     # ------------------------------------------------------------------ keys
     def _ready(self, check_title: bool = True) -> None:
@@ -290,9 +298,30 @@ class TypingEngine:
         self.kb.type_char(ch)
         self.gate.mark_sent()
         if delay:
-            base = self.s.char_delay()
-            j = self.s.jitter
-            self.sleep(max(0.0, base * self.rng.uniform(1 - j, 1 + j)))
+            self.sleep(self._human_delay())
+
+    def _human_delay(self) -> float:
+        """A per-keystroke delay that behaves like a person, not a metronome.
+
+        Delays are log-normally distributed (most keys are quick, a few are
+        slow), and the overall pace drifts every few characters so typing runs
+        in bursts: a few fast keys, then a slower patch, then a pause.
+        """
+        if self._burst_left <= 0:
+            self._burst_left = self.rng.randint(4, 16)
+            # Drift the pace a little, then sometimes jump to a new gear.
+            self._pace = min(2.2, max(0.5, self._pace + self.rng.gauss(0.0, 0.22)))
+            if self.rng.random() < 0.2:
+                self._pace = min(2.2, max(0.5, self._pace * self.rng.uniform(0.75, 1.3)))
+        self._burst_left -= 1
+        sigma = max(0.05, self.s.jitter)
+        factor = math.exp(self.rng.gauss(0.0, sigma))
+        return max(0.012, self.s.char_delay() * self._pace * factor)
+
+    def _pause(self, mean: float, sigma: float = 0.6) -> None:
+        """Pause for a log-normally distributed length around ``mean`` seconds."""
+        if mean > 0:
+            self.sleep(max(0.0, mean * math.exp(self.rng.gauss(0.0, sigma))))
 
     def _human_char(self, ch: str) -> None:
         """Type ``ch`` the way a person would: occasional miskey, then fix it."""
@@ -301,13 +330,15 @@ class TypingEngine:
             if wrong is not None and wrong != ch and self.rng.random() < self.s.typo_rate:
                 self._char(wrong)
                 # A beat to notice the mistake, then backspace and retype.
-                self.sleep(self.s.char_delay() * self.rng.uniform(0.4, 1.2))
+                self._pause(self.s.char_delay() * 0.8, 0.7)
                 self._key("delete")
         self._char(ch)
         if self.s.hesitation > 0 and self.rng.random() < self.s.hesitation:
-            self.sleep(self.s.hesitation_pause * self.rng.uniform(0.5, 2.5))
+            self._pause(self.s.hesitation_pause, 0.8)
         if ch == " " and self.s.word_pause:
-            self.sleep(self.s.word_pause * self.rng.uniform(0.5, 2.0))
+            self._pause(self.s.word_pause, 0.7)
+        elif ch in _BOUNDARY_CHARS:
+            self._pause(self.s.char_delay() * 0.9, 0.8)
 
     def _format_slip(self, indent: int, own_indent: bool) -> int:
         """Over-indent the line by one level, pause, then delete the extra spaces.
@@ -322,7 +353,7 @@ class TypingEngine:
             self.kb.type_char(" ")
             self.gate.mark_sent()
             self.sleep(self.s.key_gap)
-        self.sleep(self.s.char_delay() * self.rng.uniform(0.5, 1.5))
+        self._pause(self.s.char_delay() * 0.9, 0.7)
         for _ in range(extra):
             self._key("delete")
         if not own_indent:
@@ -467,7 +498,7 @@ class TypingEngine:
 
             self._newline()
             if self.s.line_pause:
-                self.sleep(self.s.line_pause * self.rng.uniform(0.5, 2.0))
+                self._pause(self.s.line_pause, 0.8)
 
             # Mistake: delete the whole line just typed and rewrite it.
             if (

@@ -239,7 +239,7 @@ review = true
 
 [typing]
 wpm = 40             # typing speed (words per minute)
-jitter = 0.45        # how much per-keystroke delay varies
+jitter = 0.45        # how much per-keystroke delay varies (log-normal spread)
 line_pause = 0.5     # extra pause after each line, seconds
 word_pause = 0.12    # extra pause after each space, seconds
 hesitation = 0.03    # chance per character of a longer "thinking" pause
