@@ -224,6 +224,8 @@ With a free AI, one model plays all three roles. Because free models make more m
 
 **Why pausing is safe.** Every time typing pauses, autotyper re-reads the file, keeps every line that is already correct, and continues from the first wrong one. A stray click that moved the cursor can't scramble the file.
 
+**Why modifying is safe.** For a file that already exists, autotyper computes a line diff and edits only the changed lines: it inserts new lines, deletes removed lines, and rewrites changed lines in place. Functions, classes, and anything else that already matches the solution are never deleted wholesale.
+
 ## Settings
 
 Defaults suit most people. To change them:

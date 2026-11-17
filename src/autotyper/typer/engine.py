@@ -20,6 +20,7 @@ still differs, pastes the exact target as a repair.
 
 from __future__ import annotations
 
+import difflib
 import math
 import random
 import re
@@ -447,6 +448,132 @@ class TypingEngine:
         self._clear_auto_tail(line, is_xml)
         return True
 
+    def _delete_line_1(self, line_no: int) -> None:
+        """Delete one whole line (content plus newline), leaving the rest intact."""
+        self._goto_line(line_no)
+        self._key("end", ("shift",))
+        self._key("forward_delete")
+        self._key("forward_delete")
+
+    def _type_line(self, text: str, is_xml: bool) -> bool:
+        """Type one full line at the caret, then drop only the IDE's auto tail."""
+        for ch in text:
+            self._ready(check_title=True)
+            if self._dirty:
+                return False
+            self._human_char(ch)
+        self._clear_auto_tail(text, is_xml)
+        return True
+
+    def _type_block(self, lines: list[str], is_xml: bool) -> bool:
+        """Type several lines at the caret, separated by Return. Returns False if paused."""
+        for idx, text in enumerate(lines):
+            if idx > 0:
+                self._cmd("escape")
+                self._cmd("newline")
+            if not self._type_line(text, is_xml):
+                return False
+        self._cmd("escape")
+        return True
+
+    def _insert_before_line_1(self, line_no: int, lines: list[str], is_xml: bool) -> bool:
+        """Insert lines before the 1-based ``line_no``, keeping that line intact."""
+        self._goto_line(line_no)
+        self._key("home")
+        self._cmd("newline")
+        self._key("up")
+        return self._type_block(lines, is_xml)
+
+    def _insert_after_line_1(self, line_no: int, lines: list[str], is_xml: bool) -> bool:
+        """Insert lines after the 1-based ``line_no``, keeping the lines below intact."""
+        self._goto_line(line_no)
+        self._key("end")
+        for idx, text in enumerate(lines):
+            if idx > 0:
+                self._cmd("escape")
+            self._cmd("newline")
+            if not self._type_line(text, is_xml):
+                return False
+        self._cmd("escape")
+        return True
+
+    def _apply_op(self, tag: str, i1: int, i2: int, j1: int, j2: int,
+                  target_lines: list[str], is_xml: bool) -> bool:
+        """Apply one diff op (delete/insert/replace) bottom-up, in place."""
+        if tag == "delete":
+            for line_no in range(i2, i1, -1):
+                self._delete_line_1(line_no)
+            return True
+        if tag == "insert":
+            return self._insert_at(i1, target_lines[j1:j2], is_xml)
+        # replace: delete the old range, then insert the new range at the same spot
+        for line_no in range(i2, i1, -1):
+            self._delete_line_1(line_no)
+        return self._insert_at(i1, target_lines[j1:j2], is_xml)
+
+    def _insert_at(self, i1: int, lines: list[str], is_xml: bool) -> bool:
+        if i1 == 0:
+            return self._insert_before_line_1(1, lines, is_xml)
+        return self._insert_after_line_1(i1, lines, is_xml)
+
+    def _apply_diff(self, disk: list[str], target_lines: list[str], is_xml: bool) -> bool:
+        sm = difflib.SequenceMatcher(a=disk, b=target_lines, autojunk=False)
+        for tag, i1, i2, j1, j2 in reversed(sm.get_opcodes()):
+            if tag == "equal":
+                continue
+            if not self._apply_op(tag, i1, i2, j1, j2, target_lines, is_xml):
+                return False
+        return True
+
+    def _exact_repair(self, body: list[str], skip: set[int], line_offsets: list[int], is_xml: bool) -> None:
+        """Fix whitespace-only differences one line at a time, in place."""
+        for _ in range(max(6, len(body) + 4)):
+            self._save()
+            disk = self._read_disk().split("\n")
+            if disk and disk[-1] == "":
+                disk.pop()
+            changed = False
+            for idx in range(min(len(disk), len(body))):
+                if disk[idx] != body[idx] and disk[idx].strip() == body[idx].strip():
+                    self._repair_line(idx, body[idx], skip, line_offsets[idx], is_xml)
+                    changed = True
+                    break
+            if not changed:
+                return
+
+    def _type_modify(self, path: str, target: str, body: list[str], is_xml: bool,
+                     skip: set[int], line_offsets: list[int]) -> FileOutcome:
+        """Edit an existing file in place with a line diff, never deleting its tail.
+
+        Existing functions and classes above and below the change stay intact;
+        only the changed lines are deleted/inserted/rewritten.
+        """
+        resyncs = 0
+        for _ in range(max(6, len(body) + 4)):
+            self._save()
+            current = self._read_disk()
+            if normalize(current) == normalize(target):
+                break
+            disk = current.split("\n")
+            if disk and disk[-1] == "":
+                disk.pop()
+            if not self._apply_diff(disk, body, is_xml):
+                resyncs += 1
+
+        self._save()
+        current = self._read_disk()
+        if normalize(current) == normalize(target):
+            if self.s.exact_whitespace and _lines(current) != _lines(target):
+                self._exact_repair(body, skip, line_offsets, is_xml)
+                current = self._read_disk()
+                if _lines(current) == _lines(target):
+                    return FileOutcome(path, "typed", len(body), resyncs, 0)
+                return self._paste_file(path, target, len(body), resyncs, status="typed", mistakes=0)
+            return FileOutcome(path, "typed", len(body), resyncs, 0)
+        if not self.s.repair:
+            return FileOutcome(path, "mismatch", len(body), resyncs, 0)
+        return self._paste_file(path, target, len(body), resyncs, status="repaired", mistakes=0)
+
     def _newline(self) -> None:
         self._cmd("escape")
         self._clear_after_caret()
@@ -549,6 +676,11 @@ class TypingEngine:
         for line in body:
             line_offsets.append(off)
             off += len(line) + 1
+
+        # An existing non-empty file is edited in place with a diff, so its
+        # already-written functions and classes are never deleted wholesale.
+        if self._read_disk().strip():
+            return self._type_modify(path, target, body, is_xml_file, skip, line_offsets)
 
         block_ends = block_starts(body, is_xml_file)
         resyncs = 0

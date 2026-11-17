@@ -250,6 +250,83 @@ def test_full_line_rewrite_is_off_by_default(tmp_path):
     assert ("press", "up", ()) not in ed.events  # no whole-line deletes
 
 
+def test_modify_adds_content_inside_function_without_deleting_tail(tmp_path):
+    existing = '''class MainActivity : AppCompatActivity() {
+    private var count = 0
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        println("old")
+    }
+
+    fun helper() {
+        println("keep me")
+    }
+}
+'''
+    target = '''class MainActivity : AppCompatActivity() {
+    private var count = 0
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        println("new")
+        val items = listOf(1, 2, 3)
+        println(items)
+    }
+
+    fun helper() {
+        println("keep me")
+    }
+}
+'''
+    s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=0, format_rewrite_rate=0)
+    eng, ed, *_ = make(tmp_path, settings=s)
+    path = tmp_path / "MainActivity.kt"
+    path.write_text(existing)
+    out = eng.type_file(str(path), target)
+    assert out.status == "typed", ed.text
+    assert normalize(path.read_text()) == normalize(target)
+    assert 'println("keep me")' in path.read_text()  # existing function kept
+    assert "fun helper()" in path.read_text()
+
+
+def test_modify_keeps_classes_below_the_change(tmp_path):
+    existing = '''class A {
+    fun a() = 1
+}
+
+class B {
+    fun b() = 2
+}
+
+class C {
+    fun c() = 3
+}
+'''
+    target = '''class A {
+    fun a() = 1
+}
+
+class B {
+    fun b() = 22
+    fun extra() = 4
+}
+
+class C {
+    fun c() = 3
+}
+'''
+    s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=0, format_rewrite_rate=0)
+    eng, ed, *_ = make(tmp_path, settings=s)
+    path = tmp_path / "B.kt"
+    path.write_text(existing)
+    out = eng.type_file(str(path), target)
+    assert out.status == "typed", ed.text
+    assert normalize(path.read_text()) == normalize(target)
+    # The class after the change was never deleted and retyped as a whole.
+    assert "class C" in path.read_text() and "fun c() = 3" in path.read_text()
+
+
 def test_human_delays_change_gear_from_key_to_key(tmp_path):
     eng, *_ = make(tmp_path)
     delays = [eng._human_delay() for _ in range(40)]
