@@ -240,7 +240,7 @@ def test_human_delays_change_gear_from_key_to_key(tmp_path):
     assert max(delays) > min(delays) * 2
 
 
-def test_block_rewrite_rewrites_whole_method(tmp_path):
+def test_block_review_fixes_slip_in_place_without_deleting(tmp_path):
     s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=1.0, format_rewrite_rate=0)
     eng, ed, *_ = make(tmp_path, settings=s)
     path = tmp_path / "MainActivity.kt"
@@ -248,9 +248,12 @@ def test_block_rewrite_rewrites_whole_method(tmp_path):
     assert out.status == "typed", ed.text
     assert normalize(path.read_text()) == normalize(KOTLIN)
     assert out.mistakes >= 1
+    # The whole block is never deleted: no line selections/deletes are used.
+    assert ("press", "end", ("shift",)) not in ed.events
+    assert ("press", "up", ()) not in ed.events
 
 
-def test_xml_block_rewrite_rewrites_whole_element(tmp_path):
+def test_xml_block_review_fixes_slip_in_place_without_deleting(tmp_path):
     s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=1.0, format_rewrite_rate=0)
     eng, ed, *_ = make(tmp_path, settings=s)
     path = tmp_path / "activity_main.xml"
@@ -258,6 +261,8 @@ def test_xml_block_rewrite_rewrites_whole_element(tmp_path):
     assert out.status == "typed", ed.text
     assert normalize(path.read_text()) == normalize(XML)
     assert out.mistakes >= 1
+    assert ("press", "end", ("shift",)) not in ed.events
+    assert ("press", "up", ()) not in ed.events
 
 
 def test_format_slip_overindents_then_fixes(tmp_path):

@@ -59,7 +59,7 @@ class Settings:
     hesitation_pause: float = 0.9  # base length of that pause, seconds
     typo_rate: float = 0.02  # chance per character of a single miskey, corrected right away
     line_rewrite_rate: float = 0.0  # chance per line of deleting it and retyping it (off by default)
-    block_rewrite_rate: float = 0.05  # chance per method/class/XML element of deleting and retyping it
+    block_rewrite_rate: float = 0.05  # chance per method/class/XML element of a quick in-place formatting fix (never deletes the block)
     format_rewrite_rate: float = 0.03  # chance per indented line of a mis-indent, corrected right away
     key_gap: float = 0.03  # pause between keys of an editor command
     instant: bool = False  # paste whole files instead of typing
@@ -159,7 +159,7 @@ hesitation = 0.03
 hesitation_pause = 0.9
 typo_rate = 0.02        # chance per character of a miskey, corrected right away
 line_rewrite_rate = 0.0  # chance per line of deleting it and retyping it (off by default)
-block_rewrite_rate = 0.05 # chance per method/class/XML element of deleting and retyping it
+block_rewrite_rate = 0.05 # chance per method/class/XML element of a quick in-place formatting fix (never deletes the block)
 format_rewrite_rate = 0.03 # chance per indented line of a mis-indent, corrected right away
 repair = true
 reformat = false

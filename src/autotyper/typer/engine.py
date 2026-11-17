@@ -372,10 +372,24 @@ class TypingEngine:
         self._key("end", ("shift",))
         self._key("forward_delete")
 
-    def _delete_block(self, start_line: int) -> None:
-        """Delete everything from ``start_line`` to the end of the document."""
+    def _review_block_in_place(self, start_line: int, end_line: int, has_next: bool) -> None:
+        """Fix a small formatting slip on a finished block without deleting it.
+
+        Goes back to the block's first line, adds two extra spaces and removes
+        them again (a quick in-place correction), then returns the caret to the
+        first line after the block so typing can continue.
+        """
         self._goto_line(start_line + 1)
-        self._clear_after_caret()
+        for _ in range(2):
+            self.kb.type_char(" ")
+            self.gate.mark_sent()
+            self.sleep(self.s.key_gap)
+        self._pause(self.s.char_delay() * 0.8, 0.7)
+        for _ in range(2):
+            self._key("delete")
+        if has_next:
+            self._goto_line(end_line + 2)
+            self._clear_after_caret()
 
     def _clear_after_caret(self) -> None:
         self._cmd("select_to_doc_end")
@@ -517,15 +531,17 @@ class TypingEngine:
                 i, own_indent = i, True
                 continue
 
-            # Mistake: delete a whole method/class/XML element and rewrite it.
+            # Mistake: review a whole method/class/XML element and fix a small
+            # formatting slip in place, without deleting the block.
             starts = block_ends.get(i)
             if starts and self.s.block_rewrite_rate > 0:
                 start_i = max(starts)
                 if (start_i, i) not in rewritten_blocks and self.rng.random() < self.s.block_rewrite_rate:
                     rewritten_blocks.add((start_i, i))
-                    self._delete_block(start_i)
+                    self._review_block_in_place(start_i, i, i + 1 < len(body))
                     mistakes += 1
-                    i, own_indent = start_i, True
+                    own_indent = True
+                    i += 1
                     continue
 
             own_indent = False
