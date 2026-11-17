@@ -92,6 +92,10 @@ def _settings(args) -> Settings:
         s.hud = False
     if getattr(args, "hud", False):
         s.hud = True
+    if getattr(args, "all_files", False):
+        s.kotlin_only = False
+    if getattr(args, "time_limit", None):
+        s.time_limit_minutes = args.time_limit
     if getattr(args, "provider", None):
         s.provider = args.provider
     if getattr(args, "model", None):
@@ -242,7 +246,35 @@ def _wait_for_permission(name: str, pane: str, check, why: str) -> bool:
 
 
 # ---------------------------------------------------------------------- typing
-def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = None) -> int:
+def _path_of(f):
+    return f.path if hasattr(f, "path") else f
+
+
+def _order_files(files: list, start_path: str | None) -> list:
+    """Put the chosen file first, then the rest in original order (wrapping around)."""
+    if not start_path:
+        if len(files) > 1 and _interactive():
+            return _pick_start_file(files)
+        return files
+    cleaned = _clean_path(start_path)
+    for i, f in enumerate(files):
+        p = _path_of(f)
+        if p == cleaned or Path(p).name == Path(cleaned).name:
+            return files[i:] + files[:i]
+    console.print(f"[yellow]--start {start_path!r} didn't match a file; using the plan order.[/]")
+    return files
+
+
+def _pick_start_file(files: list) -> list:
+    console.print("[bold]Which file should autotyper type first?[/]")
+    for i, f in enumerate(files, 1):
+        console.print(f"  [bold cyan]{i}[/]  {_path_of(f)}")
+    raw = console.input(f"Choose 1-{len(files)} (Enter = 1): ").strip()
+    idx = int(raw) - 1 if raw.isdigit() and 1 <= int(raw) <= len(files) else 0
+    return files[idx:] + files[:idx]
+
+
+def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = None, start_path: str | None = None) -> int:
     if sys.platform != "darwin":
         console.print("[red]Typing works on macOS only.[/] The generated files are in the session folder.")
         return 2
@@ -302,6 +334,19 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
     )
     root = Path(sol.project_root)
     files = [f for f in sol.files if not only or f.path in only]
+    if settings.kotlin_only and not only:
+        typed = [f for f in files if f.path.endswith((".kt", ".kts"))]
+        skipped = [f for f in files if f not in typed]
+        files = typed
+        if skipped:
+            console.print(
+                f"[dim]Typing Kotlin only: skipping {len(skipped)} resource file(s) "
+                f"([bold]--all-files[/] types everything).[/]"
+            )
+    if not files:
+        console.print("[yellow]Nothing to type.[/] No Kotlin files in this solution.")
+        return 0
+    files = _order_files(files, start_path)
     progress = {"path": None, "n": 0}
 
     def on_progress(path: str, line: int, total: int) -> None:
@@ -312,7 +357,8 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
         if hud:
             hud.update(file=Path(path).name, index=progress["n"], count=len(files), line=line, total=total)
 
-    engine = TypingEngine(macos.MacKeyboard(), macos.MacClipboard(), opener, gate, settings, on_progress=on_progress)
+    engine = TypingEngine(macos.MacKeyboard(), macos.MacClipboard(), opener, gate, settings, on_progress=on_progress,
+                          pace_scale=_pace_for(files, settings))
 
     console.print(Panel(
         "1. Open your project in Android Studio.\n"
@@ -359,6 +405,22 @@ def _type_solution(sol: Solution, settings: Settings, only: list[str] | None = N
         for step in sol.plan.user_steps:
             console.print(f"  • {step}")
     return 0 if all(r.status != "mismatch" for r in results) else 1
+
+
+def _pace_for(files: list, settings: Settings) -> float:
+    """Scale key delays so the whole batch fits the configured time budget.
+
+    Returns 1.0 when the natural pace already fits, otherwise a smaller
+    multiplier (keeps the same uneven per-key pattern, just faster overall).
+    """
+    if settings.time_limit_minutes <= 0 or settings.instant:
+        return 1.0
+    total_chars = sum(len(f.content) for f in files)
+    budget = settings.time_limit_minutes * 60.0
+    estimated = settings.estimated_type_seconds(total_chars)
+    if estimated <= budget:
+        return 1.0
+    return max(0.05, budget / estimated)
 
 
 # ---------------------------------------------------------------------- task prompt
@@ -784,7 +846,7 @@ def cmd_solve(args) -> int:
     if not args.yes and not _confirm(f"Type {len(solution.files)} file(s) into Android Studio now?"):
         console.print("Type it later with: [bold]autotyper type[/]")
         return 0
-    return _type_solution(solution, settings)
+    return _type_solution(solution, settings, start_path=getattr(args, "start", None))
 
 
 class _Ticker:
@@ -848,7 +910,7 @@ def cmd_type(args) -> int:
     _print_plan(sol, [])
     if not args.yes and not _confirm(f"Type {len(sol.files)} file(s) into Android Studio now?"):
         return 0
-    return _type_solution(sol, settings, only=args.only)
+    return _type_solution(sol, settings, only=args.only, start_path=getattr(args, "start", None))
 
 
 def cmd_sessions(args) -> int:
@@ -942,6 +1004,9 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--reformat", action="store_true", help="run Reformat Code after each file")
         g.add_argument("--no-hud", action="store_true", help="don't show the floating status overlay (default)")
         g.add_argument("--hud", action="store_true", help="show the floating status overlay while typing")
+        g.add_argument("--start", metavar="PATH", help="start typing with this file, then wrap around the rest")
+        g.add_argument("--all-files", action="store_true", help="type every generated file, including resources/XML (default: Kotlin only)")
+        g.add_argument("--time-limit", metavar="MINUTES", type=float, help="pace the whole run to finish within this many minutes (default 45)")
         g.add_argument("-y", "--yes", action="store_true", help="start typing without asking")
 
     st = sub.add_parser("setup", help="first-time setup: Claude sign-in and macOS permissions")

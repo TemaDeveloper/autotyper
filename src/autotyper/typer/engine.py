@@ -259,6 +259,7 @@ class TypingEngine:
         rng: random.Random | None = None,
         open_wait: float = 1.0,
         save_wait: float = 0.4,
+        pace_scale: float = 1.0,
     ):
         self.kb = keyboard
         self.clipboard = clipboard
@@ -270,6 +271,7 @@ class TypingEngine:
         self.rng = rng or random.Random()
         self.open_wait = open_wait
         self.save_wait = save_wait
+        self.pace_scale = max(0.05, pace_scale)
         self._path: str | None = None
         self._dirty = False  # a pause happened -> re-sync before typing more
         # Human pacing state: each character picks a short "tempo run" so the
@@ -321,12 +323,12 @@ class TypingEngine:
         self._tempo_left -= 1
         sigma = max(0.04, self.s.jitter * 0.4)
         factor = math.exp(self.rng.gauss(0.0, sigma))
-        return max(0.012, self.s.char_delay() * self._tempo * factor)
+        return max(0.008, self.s.char_delay() * self._tempo * factor * self.pace_scale)
 
     def _pause(self, mean: float, sigma: float = 0.6) -> None:
         """Pause for a log-normally distributed length around ``mean`` seconds."""
         if mean > 0:
-            self.sleep(max(0.0, mean * math.exp(self.rng.gauss(0.0, sigma))))
+            self.sleep(max(0.0, mean * self.pace_scale * math.exp(self.rng.gauss(0.0, sigma))))
 
     def _human_char(self, ch: str) -> None:
         """Type ``ch`` the way a person would: occasional miskey, then fix it."""

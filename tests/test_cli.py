@@ -59,6 +59,31 @@ def test_parser_accepts_positional_task_and_optional_session():
     assert c.cmd is None
 
 
+def test_typing_flags_parse_and_apply():
+    from autotyper.config import Settings
+
+    p = cli.build_parser()
+    args = p.parse_args(["type", "--all-files", "--start", "app/Main.kt", "--time-limit", "30"])
+    s = cli._settings(args)
+    assert s.kotlin_only is False
+    assert s.time_limit_minutes == 30
+    assert args.start == "app/Main.kt"
+
+
+def test_kotlin_only_is_the_default():
+    from autotyper.config import Settings
+
+    assert Settings().kotlin_only is True
+    assert Settings().time_limit_minutes == 45.0
+
+
+def test_order_files_wraps_from_chosen_start():
+    files = ["a.kt", "b.kt", "c.kt"]
+    assert cli._order_files(files, "b.kt") == ["b.kt", "c.kt", "a.kt"]
+    assert cli._order_files(files, "c.kt") == ["c.kt", "a.kt", "b.kt"]
+    assert cli._order_files(files, "missing.kt") == files
+
+
 def test_type_without_sessions_is_friendly(tmp_path, capsys):
     (tmp_path / "settings.gradle.kts").write_text('include(":app")\n')
     code = cli.main(["type", "--project", str(tmp_path)])

@@ -69,6 +69,8 @@ class Settings:
     reformat: bool = False  # run IDE "Reformat Code" after each file
     exact_whitespace: bool = True  # if only indentation differs at the end, paste the exact target
     xml_attr_quotes: bool = False  # if your IDE auto-inserts "" after = in XML, set true to skip typing the opening quote
+    kotlin_only: bool = True  # type only Kotlin source files; skip resources/XML/etc.
+    time_limit_minutes: float = 45.0  # pace all files so typing finishes within this many minutes
     hud: bool = False  # floating status overlay (opt-in; off by default so nothing shows on screen)
 
     # --- focus gate ---------------------------------------------------
@@ -90,6 +92,13 @@ class Settings:
 
     def char_delay(self) -> float:
         return 60.0 / (max(self.wpm, 1) * 5)
+
+    def estimated_type_seconds(self, chars: int) -> float:
+        """Rough wall-clock estimate for typing ``chars`` chars at current settings."""
+        if chars <= 0:
+            return 0.0
+        # char_delay * mean tempo (~1.1) plus word/line/hesitation overhead.
+        return chars * self.char_delay() * 1.4
 
 
 CHOICES_PATH = CONFIG_PATH.parent / "choices.toml"  # written by `autotyper login`
@@ -165,6 +174,8 @@ block_rewrite_rate = 0.05 # chance per method/class/XML element of a quick in-pl
 format_rewrite_rate = 0.03 # chance per indented line of a mis-indent, corrected right away
 repair = true
 reformat = false
+kotlin_only = true   # type only Kotlin source files; skip resources/XML/etc.
+time_limit_minutes = 45  # pace the whole run to finish within this many minutes
 hud = false         # floating status overlay (opt-in; off by default)
 
 [focus]
