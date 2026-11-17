@@ -129,6 +129,7 @@ Tasks can be text, PDF, screenshots (PNG/JPG), Markdown or a saved web page.
 | Open a different file tab | Waits until you come back to the right file |
 | Type or click yourself | Pauses until you stop for about a second |
 | Come back to Android Studio | Checks the file, fixes anything that moved, continues |
+| A file finishes | Opens the next file in Android Studio by itself, no prompt |
 | Press **Ctrl+Option+Cmd+P** | Pauses / resumes |
 | Press **Ctrl+Option+Cmd+X** (or Ctrl+C in the terminal) | Stops |
 

@@ -258,6 +258,48 @@ def test_human_delays_change_gear_from_key_to_key(tmp_path):
     assert max(delays) > min(delays) * 2
 
 
+def test_open_auto_switches_and_retries_until_the_file_is_in_front(tmp_path):
+    # The engine must open the next file on its own, retrying a couple of times
+    # if the IDE still shows another tab - no prompt from the user.
+    from autotyper.typer.gate import FocusGate, FocusState
+
+    titles = ["whatever", "OtherFile.kt", "OtherFile.kt", "Target.kt", "Target.kt"]
+
+    class Probe:
+        def state(self, ids):
+            title = titles.pop(0) if titles else "Target.kt"
+            return FocusState("com.google.android.studio", "Android Studio", True, title)
+
+    class Monitor:
+        available = False
+        paused_by_hotkey = False
+        abort_requested = False
+
+        def last_user_event_time(self):
+            return 0.0
+
+    class Clock:
+        def __init__(self):
+            self.t = 0.0
+
+        def __call__(self):
+            return self.t
+
+        def sleep(self, s):
+            self.t += max(s, 0.0)
+
+    clock = Clock()
+    ed = FakeJetBrainsEditor()
+    s = Settings()
+    gate = FocusGate(Probe(), Monitor(), s.ide_bundle_ids, clock=clock, sleep=clock.sleep)
+    eng = TypingEngine(ed, ed, ed, gate, s, sleep=clock.sleep)
+    path = tmp_path / "Target.kt"
+    path.write_text("x")
+    eng.open(str(path))
+    opens = [e for e in ed.events if e[0] == "open_file"]
+    assert [o[1] for o in opens] == [str(path)] * 3  # retried until the right tab was in front
+
+
 def test_block_review_fixes_slip_in_place_without_deleting(tmp_path):
     s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=1.0, format_rewrite_rate=0)
     eng, ed, *_ = make(tmp_path, settings=s)

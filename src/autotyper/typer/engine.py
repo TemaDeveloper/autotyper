@@ -520,8 +520,14 @@ class TypingEngine:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("", encoding="utf-8")
         self._ready(check_title=False)
-        self.opener.open_file(path)
-        self.sleep(self.open_wait)
+        # Ask the IDE to open/focus the next file automatically. Re-opening the
+        # same file is harmless (it just refocuses the tab), so retry a couple
+        # of times to survive a slow tab switch - no prompt needed from the user.
+        for _ in range(3):
+            self.opener.open_file(path)
+            self.sleep(self.open_wait)
+            if self.gate.target_open(path):
+                break
         self._ready(check_title=True)
 
     def type_file(self, path: str, target: str) -> FileOutcome:

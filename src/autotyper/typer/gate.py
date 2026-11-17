@@ -154,6 +154,16 @@ class FocusGate:
         self._last_ready_check = self.clock()
         return paused
 
+    def target_open(self, target_path: str) -> bool:
+        """True when the IDE window title names ``target_path`` (or can't be read).
+
+        Used to stop re-asking the IDE to open the file once its tab is in front.
+        """
+        if not target_path:
+            return True
+        st = self.probe.state(self.ide_bundle_ids)
+        return not title_names_other_file(st.window_title, target_path)
+
     def mark_sent(self) -> None:
         """Call right after posting synthetic keys so they are not counted as user input."""
         self._last_ready_check = self.clock()
