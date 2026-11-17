@@ -32,7 +32,7 @@ class SmartKeys:
     enter_closes_brace: bool = True
     doc_comment_stub: bool = True
     xml_close_tag: bool = True
-    xml_attr_quotes: bool = True
+    xml_attr_quotes: bool = False
     xml_self_close: bool = True
     completion_popup: bool = True
 

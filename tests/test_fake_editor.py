@@ -214,13 +214,22 @@ def test_xml_close_tag_inserted_on_gt(tmp_path: Path) -> None:
 
 
 def test_xml_attribute_equals_inserts_quotes(tmp_path: Path) -> None:
-    ed = FakeJetBrainsEditor()
+    ed = FakeJetBrainsEditor(SmartKeys(xml_attr_quotes=True))
     open_in(ed, tmp_path, "layout.xml", "")
     type_text(ed, '<TextView android:text=')
     assert ed.text == '<TextView android:text=""'
     assert ed.caret == len(ed.text) - 1
     ed.type_char('"')  # overtypes the auto-inserted closing quote
     assert ed.text == '<TextView android:text=""'
+    assert ed.caret == len(ed.text)
+
+
+def test_xml_attribute_quotes_pair_on_the_quote_key_by_default(tmp_path: Path) -> None:
+    # Modern Android Studio doesn't insert "" on '='; the quote itself pairs.
+    ed = FakeJetBrainsEditor()
+    open_in(ed, tmp_path, "layout.xml", "")
+    type_text(ed, '<TextView android:text="hello"')
+    assert ed.text == '<TextView android:text="hello"'
     assert ed.caret == len(ed.text)
 
 

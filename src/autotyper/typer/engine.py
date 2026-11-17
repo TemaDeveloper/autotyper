@@ -460,15 +460,15 @@ class TypingEngine:
         if self.s.instant:
             return self._paste_file(path, target, len(body), resyncs=0, status="typed", mistakes=0)
 
-        is_xml = path.endswith(".xml") and self.s.xml_attr_quotes
-        skip = xml_skip_quote_positions(target) if is_xml else set()
+        is_xml_file = path.endswith(".xml")
+        skip = xml_skip_quote_positions(target) if (is_xml_file and self.s.xml_attr_quotes) else set()
         line_offsets = []
         off = 0
         for line in body:
             line_offsets.append(off)
             off += len(line) + 1
 
-        block_ends = block_starts(body, is_xml)
+        block_ends = block_starts(body, is_xml_file)
         resyncs = 0
         mistakes = 0
         rewritten_lines: set[int] = set()

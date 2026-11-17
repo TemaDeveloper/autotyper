@@ -163,9 +163,12 @@ def test_pauses_when_ide_not_front_and_resyncs_after_caret_moved(tmp_path):
 
 
 def test_repair_when_typing_gets_mangled(tmp_path):
-    # Without the XML quote heuristic the attribute quotes double up; repair must fix it.
+    # Engine types quotes normally, but this simulated IDE still auto-inserts
+    # "" after '=' in XML attributes, so the quotes double up; repair must fix it.
+    from autotyper.typer.fake_editor import SmartKeys
+
     s = Settings(xml_attr_quotes=False)
-    eng, ed, *_ = make(tmp_path, settings=s)
+    eng, ed, *_ = make(tmp_path, settings=s, smart=SmartKeys(xml_attr_quotes=True))
     path = tmp_path / "activity_main.xml"
     out = eng.type_file(str(path), XML)
     assert out.status == "repaired"

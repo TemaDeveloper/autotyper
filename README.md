@@ -252,6 +252,7 @@ block_rewrite_rate = 0.05   # chance per method/class/XML element of redoing it
 format_rewrite_rate = 0.03  # chance per indented line of a mis-indent, fixed right away
 instant = false      # true = paste instead of type
 repair = true        # paste the exact file if typing went wrong
+xml_attr_quotes = false  # only set true if your IDE inserts "" right after = in XML
 hud = false          # floating status overlay (opt-in; off by default)
 
 [focus]

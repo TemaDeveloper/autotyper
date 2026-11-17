@@ -66,7 +66,7 @@ class Settings:
     repair: bool = True  # paste the exact target if the typed result differs
     reformat: bool = False  # run IDE "Reformat Code" after each file
     exact_whitespace: bool = True  # if only indentation differs at the end, paste the exact target
-    xml_attr_quotes: bool = True  # Android Studio inserts "" after = in XML attributes
+    xml_attr_quotes: bool = False  # if your IDE auto-inserts "" after = in XML, set true to skip typing the opening quote
     hud: bool = False  # floating status overlay (opt-in; off by default so nothing shows on screen)
 
     # --- focus gate ---------------------------------------------------
