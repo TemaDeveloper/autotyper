@@ -69,6 +69,31 @@ def test_openai_compat_retries_rate_limit_then_explains():
     assert waits == [3.0, 3.0]
 
 
+def test_openai_compat_switches_immediately_when_free_limit_has_fallback():
+    seen, notices, waits = [], [], []
+
+    async def fake_sleep(s):
+        waits.append(s)
+
+    def handler(req):
+        model = json.loads(req.content)["model"]
+        seen.append(model)
+        if model == "gemini-over":
+            return httpx.Response(429, headers={"retry-after": "90"})
+        return sse('{"content": "x"}')
+
+    b = OpenAICompatBackend("gemini", "https://g.test", "k", sleep=fake_sleep,
+                            fallback_models=["gemini-works"],
+                            http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    b.notice = notices.append
+    assert run(b.complete(model="gemini-over", effort="high", system="s",
+                          content=[{"type": "text", "text": "t"}],
+                          schema=SCHEMA, max_tokens=10, label="planning"))[0] == {"content": "x"}
+    assert seen == ["gemini-over", "gemini-works"]
+    assert waits == []  # no 90s retries on the exhausted model
+    assert notices and "over its free limit - switching to gemini-works" in notices[0]
+
+
 def test_openai_compat_sends_images_as_data_urls():
     def handler(req):
         user = json.loads(req.content)["messages"][1]["content"]

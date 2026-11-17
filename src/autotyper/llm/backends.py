@@ -330,6 +330,14 @@ class OpenAICompatBackend:
                 raise LLMError(f"Network error talking to {self.name} during {label}: {e}") from e
 
             if status == 429 or status >= 500:
+                # A 429 from the free tier means "no quota left" for *this model*.
+                # Retrying the same model just burns the 90s retry-after twice, so
+                # switch to the next fallback model straight away when one exists.
+                if status == 429 and self.fallbacks:
+                    nxt = self._switch_model(model, "is over its free limit")
+                    if nxt:
+                        model, attempt = nxt, 0
+                        continue
                 attempt += 1
                 give_up = 2 if self.fallbacks else self.max_retries
                 if attempt > give_up:
