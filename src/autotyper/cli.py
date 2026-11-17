@@ -434,6 +434,7 @@ def _setup_provider(name: str) -> bool:
         "ollama": _setup_ollama,
         "gemini": lambda: _setup_keyed("gemini"),
         "openrouter": lambda: _setup_keyed("openrouter"),
+        "deepseek": lambda: _setup_keyed("deepseek"),
     }[name]()
     if ok:
         save_choices({"provider": name})
@@ -519,6 +520,12 @@ def _setup_keyed(name: str) -> bool:
                 "[bold]Create API key[/].\n[dim]On the free tier Google may use what you send "
                 "(your task and code) to improve its products.[/]"
             )
+        elif name == "deepseek":
+            console.print(
+                "DeepSeek is a paid API (topped-up credit). Create a key at "
+                "[link=https://platform.deepseek.com/api_keys]platform.deepseek.com/api_keys[/link] "
+                "and top up credit in Billing."
+            )
         else:
             console.print("Create a free OpenRouter account (Google sign-in works) and click [bold]Create Key[/].")
         console.print(f"Page: {p.key_url}")
@@ -567,6 +574,20 @@ def _pick_model_for(name: str, key: str) -> str | None:
                 console.print("[red]Google rejected that key.[/] Copy it again from the page and retry.")
                 return None
         console.print("[red]No Gemini model answered right now.[/] Try again in a few minutes.")
+        return None
+
+    if name == "deepseek":
+        console.print("Checking your DeepSeek key...")
+        for model in ("deepseek-chat", "deepseek-reasoner"):
+            with console.status(f"Trying {model}..."):
+                problem = providers.probe_model("deepseek", key, model)
+            if not problem:
+                console.print(f"  [green]✔[/] {model}")
+                return model
+            console.print(f"  [dim]✘ {model}: {problem}[/]")
+            if problem in ("key rejected", "payment required - top up your credit"):
+                return None
+        console.print("[red]No DeepSeek model answered right now.[/] Check your key and credit balance.")
         return None
 
     r = httpx.get(f"{providers.get('openrouter').base_url}/key", headers={"Authorization": f"Bearer {key}"}, timeout=15.0)
@@ -927,9 +948,9 @@ def build_parser() -> argparse.ArgumentParser:
     st.add_argument("--write-config", action="store_true", help="also create a settings file to customise")
     st.set_defaults(func=cmd_setup)
 
-    lg = sub.add_parser("login", help="choose and connect your AI: Claude, or free Ollama / Gemini / OpenRouter")
+    lg = sub.add_parser("login", help="choose and connect your AI: Claude, or free Ollama / Gemini / OpenRouter, or paid DeepSeek")
     lg.add_argument("provider_name", nargs="?", choices=list(providers.PROVIDERS), metavar="AI",
-                    help="claude | ollama | gemini | openrouter (default: ask)")
+                    help="claude | ollama | gemini | openrouter | deepseek (default: ask)")
     lg.add_argument("--again", action="store_true", help="sign in to Claude again, e.g. with another account")
     lg.set_defaults(func=cmd_login)
 

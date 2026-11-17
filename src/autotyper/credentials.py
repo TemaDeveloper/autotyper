@@ -89,6 +89,7 @@ def client_kwargs() -> dict:
 PROVIDER_KEY_ENV = {
     "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
     "openrouter": ("OPENROUTER_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
 }
 
 

@@ -39,6 +39,7 @@ Every solution also comes with an **EXPLANATION.md**: a plain-language walkthrou
 | **Ollama** (on your Mac) | **Free** | Good for small apps with the coder models | Runs offline, and your code never leaves your Mac. One-time download of 5–19 GB. Slower: 5–20 minutes per task. A 16 GB+ Apple Silicon Mac is recommended. |
 | **Google Gemini** | **Free tier** | Good | Free key from [Google AI Studio](https://aistudio.google.com/apikey). Daily limits apply. On the free tier, Google may use what you send to improve its products. |
 | **OpenRouter** free models | **Free** | Varies by model | Free key from [openrouter.ai](https://openrouter.ai/settings/keys). Rate limits apply, and the list of free models changes; setup shows what's free today. |
+| **DeepSeek** | Paid from [DeepSeek Platform](https://platform.deepseek.com) credit (as little as a few cents per task) | Very good for coding | Cheap `deepseek-chat` and `deepseek-reasoner` models. Create an API key, top up credit, and paste the key. |
 
 Switch any time with `autotyper login`, or for one run with `autotyper solve --provider ollama "..."`.
 
@@ -75,7 +76,7 @@ It walks you through four steps and opens the right settings for you:
 1. **Choose your AI.** Pick one from the list:
    - **Claude:** choose **Sign in with your browser** and sign in with Google (or email). The first time, setup offers to install Anthropic's small `ant` sign-in tool with Homebrew.
    - **Ollama:** setup installs and starts Ollama if needed. Then pick a model size and it downloads it, once: `qwen2.5-coder:14b` (9 GB) is recommended, `qwen3-coder:30b` (19 GB) is best if you have 32 GB of RAM.
-   - **Gemini or OpenRouter:** setup opens the page for a free key. Paste the key, and setup checks it and picks a model.
+   - **Gemini, OpenRouter, or DeepSeek:** setup opens the page for an API key. Paste the key, and setup checks it and picks a model.
 
    Keys are stored only on your Mac, readable only by you.
 2. **Android Studio.** Checks that it's installed.
@@ -168,7 +169,7 @@ That types the newest solution. Use `autotyper sessions` to list all of them.
 |---|---|
 | `autotyper` | Welcome screen: what's ready, what to do next |
 | `autotyper setup` | Guided first-time setup |
-| `autotyper login [ai]` | Choose and connect your AI: `claude`, `ollama`, `gemini` or `openrouter` |
+| `autotyper login [ai]` | Choose and connect your AI: `claude`, `ollama`, `gemini`, `openrouter` or `deepseek` |
 | `autotyper solve [task or files]` | Write the solution and type it |
 | `autotyper type [session]` | Type a saved solution again (no API cost) |
 | `autotyper sessions` | List saved solutions for this project |
@@ -187,7 +188,7 @@ Useful options for `solve` and `type`:
 | `--no-hud` | Don't show the floating status overlay (the default) |
 | `--hud` | Show the floating status overlay while typing |
 | `--no-review` | Skip the final review pass (faster, cheaper) |
-| `--provider NAME` | Use a different AI this time: `claude`, `ollama`, `gemini`, `openrouter` |
+| `--provider NAME` | Use a different AI this time: `claude`, `ollama`, `gemini`, `openrouter`, `deepseek` |
 | `--model NAME` | Use a specific model of that AI, e.g. `--model qwen3-coder:30b` |
 
 ## How it works
@@ -230,7 +231,7 @@ Then edit `~/.config/autotyper/config.toml`:
 
 ```toml
 [models]
-# provider = "ollama"                   # claude | ollama | gemini | openrouter (autotyper login sets it)
+# provider = "ollama"                   # claude | ollama | gemini | openrouter | deepseek (autotyper login sets it)
 # ollama_model = "qwen2.5-coder:14b"
 orchestrator_model = "claude-opus-5-5"   # planner and reviewer
 orchestrator_effort = "xhigh"            # low | medium | high | xhigh | max
@@ -318,7 +319,7 @@ src/autotyper/
 ├── project_context.py   reads the Android project for context
 ├── task_input.py        reads text, PDF, images, HTML, clipboard
 ├── solution.py          plan/files and saved sessions
-├── providers.py         Claude / Ollama / Gemini / OpenRouter setup and model picking
+├── providers.py         Claude / Ollama / Gemini / OpenRouter / DeepSeek setup and model picking
 ├── llm/                 planner → writers → reviewer pipeline, prompts, AI backends
 ├── typer/               typing engine, pause rules, simulated editor for tests
 └── platform/

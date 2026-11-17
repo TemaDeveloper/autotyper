@@ -103,6 +103,23 @@ def test_openai_compat_retries_server_busy_then_explains():
     assert waits == [3.0, 3.0]
 
 
+def test_deepseek_uses_json_object_not_json_schema():
+    seen = []
+
+    def handler(req):
+        body = json.loads(req.content)
+        seen.append((body.get("response_format"), "stream_options" in body))
+        return sse('{"content": "x"}')
+
+    b = OpenAICompatBackend("deepseek", "https://d.test", "k",
+                            http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    data, _ = call(b)
+    assert data == {"content": "x"}
+    # DeepSeek supports JSON mode, not OpenAI json_schema mode, and does not
+    # accept the include_usage stream option.
+    assert seen == [({"type": "json_object"}, False)]
+
+
 def test_openai_compat_switches_immediately_when_free_limit_has_fallback():
     seen, notices, waits = [], [], []
 
@@ -192,6 +209,25 @@ def test_models_for_each_provider():
     assert providers.models_for(s) == ("claude-opus-5-5", "claude-haiku-5-5")
     s.provider = "ollama"
     assert providers.models_for(s) == ("qwen2.5-coder:14b", "qwen2.5-coder:14b")
+
+
+def test_deepseek_provider_is_wired():
+    assert "deepseek" in providers.PROVIDERS
+    assert providers.get("deepseek").base_url == "https://api.deepseek.com"
+    s = Settings(provider="deepseek")
+    assert providers.models_for(s) == ("deepseek-chat", "deepseek-chat")
+    s.deepseek_model = "deepseek-reasoner"
+    assert providers.models_for(s) == ("deepseek-reasoner", "deepseek-reasoner")
+
+
+def test_deepseek_payment_required_is_reported(monkeypatch):
+    from autotyper.providers import probe_model
+
+    class R:
+        status_code = 402
+
+    monkeypatch.setattr("autotyper.providers.httpx.post", lambda *a, **k: R())
+    assert probe_model("deepseek", "k", "deepseek-chat") == "payment required - top up your credit"
 
 
 def test_choices_file_then_config_precedence(tmp_path):

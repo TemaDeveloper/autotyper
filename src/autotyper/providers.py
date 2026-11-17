@@ -45,6 +45,11 @@ PROVIDERS: dict[str, Provider] = {
         base_url="https://openrouter.ai/api/v1",
         key_url="https://openrouter.ai/settings/keys",
     ),
+    "deepseek": Provider(
+        "deepseek", "DeepSeek", "cheap paid API · deepseek-chat / deepseek-reasoner", 90_000, 2,
+        base_url="https://api.deepseek.com",
+        key_url="https://platform.deepseek.com/api_keys",
+    ),
 }
 
 OLLAMA_CHOICES = [
@@ -65,7 +70,12 @@ def models_for(s: Settings) -> tuple[str, str]:
     """(planner model, writer model) for the chosen provider."""
     if s.provider == "claude":
         return s.orchestrator_model, s.worker_model
-    model = {"ollama": s.ollama_model, "gemini": s.gemini_model, "openrouter": s.openrouter_model}[s.provider]
+    model = {
+        "ollama": s.ollama_model,
+        "gemini": s.gemini_model,
+        "openrouter": s.openrouter_model,
+        "deepseek": s.deepseek_model,
+    }[s.provider]
     return model, model
 
 
@@ -191,6 +201,8 @@ def probe_model(provider: str, key: str, model: str, timeout: float = 20.0) -> s
         return ""
     if r.status_code == 429:
         return "no free quota right now"
+    if r.status_code == 402:
+        return "payment required - top up your credit"
     if r.status_code == 404:
         return "not available"
     if r.status_code in (401, 403):

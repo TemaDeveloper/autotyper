@@ -40,6 +40,7 @@ class Settings:
     ollama_url: str = "http://localhost:11434"
     gemini_model: str = "gemini-flash-latest"
     openrouter_model: str = ""  # picked from the current free models by `autotyper login`
+    deepseek_model: str = "deepseek-chat"  # deepseek-chat (fast/coding) | deepseek-reasoner (slower, deeper)
 
     # --- models (Claude) ----------------------------------------------
     orchestrator_model: str = "claude-opus-5-5"
@@ -139,13 +140,14 @@ def apply_overrides(s: Settings, data: dict) -> Settings:
 
 SAMPLE_CONFIG = """\
 # ~/.config/autotyper/config.toml
-provider = "claude"   # claude | ollama | gemini | openrouter (autotyper login sets this)
+provider = "claude"   # claude | ollama | gemini | openrouter | deepseek (autotyper login sets this)
 
 [models]
 orchestrator_model = "claude-opus-5-5"
 orchestrator_effort = "xhigh"
 worker_model = "claude-haiku-5-5"
 worker_effort = "medium"
+deepseek_model = "deepseek-chat"   # deepseek-chat | deepseek-reasoner
 review = true
 
 [typing]

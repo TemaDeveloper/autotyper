@@ -231,6 +231,9 @@ class OpenAICompatBackend:
         self.read_timeout = read_timeout
         self.active_model: str | None = None  # set once we had to switch away from the requested model
         self.format_level = 0  # downgraded when a provider/model rejects structured output
+        if name == "deepseek":
+            # DeepSeek supports JSON mode, not OpenAI's json_schema mode.
+            self.format_level = 1
         self.notice: Callable[[str], None] = lambda msg: None
 
     def _response_format(self, schema: dict) -> dict | None:
@@ -276,8 +279,10 @@ class OpenAICompatBackend:
                 "max_tokens": max_tokens,
                 "temperature": 0.2,
                 "stream": True,
-                "stream_options": {"include_usage": True},
             }
+            if self.name != "deepseek":
+                # DeepSeek's OpenAI-compatible endpoint does not accept stream_options.
+                body["stream_options"] = {"include_usage": True}
             rf = self._response_format(schema)
             if rf:
                 body["response_format"] = rf
