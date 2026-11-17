@@ -132,14 +132,15 @@ Tasks can be text, PDF, screenshots (PNG/JPG), Markdown or a saved web page.
 | Press **Ctrl+Option+Cmd+P** | Pauses / resumes |
 | Press **Ctrl+Option+Cmd+X** (or Ctrl+C in the terminal) | Stops |
 
-Typing is human-paced on purpose and deliberately uneven: the speed varies from
-keystroke to keystroke, there are pauses at word boundaries and occasional
-longer "thinking" pauses, and it makes the same kinds of mistakes a person
-makes — a wrong key, a whole line that gets deleted and retyped, a block
-(method, class or XML element) that gets redone, or a mis-indent that gets
-fixed. Everything is corrected on the spot, so the finished file is still
-exact. Set the speed with `--wpm` and tune the mistake rates in the settings
-file (set them to 0 to turn a mistake type off).
+Typing is human-paced on purpose and deliberately uneven: the speed changes
+from one key to the next (a couple of fast keys, then a slower one, then a
+middle pace), there are pauses at word boundaries and occasional longer
+"thinking" pauses, and it makes the same kinds of mistakes a person makes — a
+wrong key that is backspaced and retyped, a block (method, class or XML
+element) that gets redone, or a mis-indent that gets fixed. Everything is
+corrected on the spot, so the finished file is still exact. Set the speed with
+`--wpm` and tune the mistake rates in the settings file (set them to 0 to turn
+a mistake type off).
 
 A small **status overlay** floats in the top-right corner while it types: the current file, a progress bar, and whether typing is running or paused (and why). It follows you to other desktops, never takes clicks or focus, and is hidden from screenshots and screen recordings. It's off by default — nothing shows on screen. Turn it on with `--hud`, preview it with `python -m autotyper.platform.hud --demo`, or set `hud = true` in the settings file.
 
@@ -246,7 +247,7 @@ word_pause = 0.12    # extra pause after each space, seconds
 hesitation = 0.03    # chance per character of a longer "thinking" pause
 hesitation_pause = 0.9  # base length of that pause, seconds
 typo_rate = 0.02     # chance per character of a wrong key, fixed right away
-line_rewrite_rate = 0.02    # chance per line of deleting it and retyping it
+line_rewrite_rate = 0.0    # chance per line of deleting it and retyping it (off by default)
 block_rewrite_rate = 0.05   # chance per method/class/XML element of redoing it
 format_rewrite_rate = 0.03  # chance per indented line of a mis-indent, fixed right away
 instant = false      # true = paste instead of type

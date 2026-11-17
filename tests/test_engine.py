@@ -220,6 +220,23 @@ def test_line_rewrite_deletes_and_retypes_the_line(tmp_path):
     assert out.mistakes >= 1
 
 
+def test_full_line_rewrite_is_off_by_default(tmp_path):
+    assert Settings().line_rewrite_rate == 0
+    eng, ed, *_ = make(tmp_path)
+    path = tmp_path / "MainActivity.kt"
+    out = eng.type_file(str(path), KOTLIN)
+    assert out.status == "typed", ed.text
+    assert ("press", "up", ()) not in ed.events  # no whole-line deletes
+
+
+def test_human_delays_change_gear_from_key_to_key(tmp_path):
+    eng, *_ = make(tmp_path)
+    delays = [eng._human_delay() for _ in range(40)]
+    # Not a metronome: several distinct delays and a wide spread between gears.
+    assert len(set(round(d, 3) for d in delays)) >= 10
+    assert max(delays) > min(delays) * 2
+
+
 def test_block_rewrite_rewrites_whole_method(tmp_path):
     s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=1.0, format_rewrite_rate=0)
     eng, ed, *_ = make(tmp_path, settings=s)

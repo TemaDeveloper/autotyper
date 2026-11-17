@@ -45,6 +45,10 @@ _OPEN_TAG = re.compile(r"<\s*([A-Za-z_][\w.:-]*)")
 # Characters after which a person naturally hesitates a beat while coding.
 _BOUNDARY_CHARS = {",", ";", "{", "}"}
 
+# Distinct typing gears. Runs of 1-3 keys share a gear, then switch to a
+# different one, so adjacent keys are never stuck at the same speed.
+_TEMPOS = (0.5, 0.75, 1.0, 1.4, 1.9)
+
 
 def plausible_typo(rng: random.Random, ch: str) -> str | None:
     """Return a nearby QWERTY key for ``ch`` (a plausible miskey), or None.
@@ -268,10 +272,11 @@ class TypingEngine:
         self.save_wait = save_wait
         self._path: str | None = None
         self._dirty = False  # a pause happened -> re-sync before typing more
-        # Human pacing state: typing comes in bursts whose speed drifts, so the
-        # intervals never settle into a metronome.
-        self._pace = 1.0  # >1 = slower, <1 = faster; drifts between bursts
-        self._burst_left = 0
+        # Human pacing state: each character picks a short "tempo run" so the
+        # gap before every key keeps changing - a couple of fast keys, then one
+        # slow one, then some at a middle pace, never a steady metronome.
+        self._tempo: float | None = None
+        self._tempo_left = 0
 
     # ------------------------------------------------------------------ keys
     def _ready(self, check_title: bool = True) -> None:
@@ -301,22 +306,22 @@ class TypingEngine:
             self.sleep(self._human_delay())
 
     def _human_delay(self) -> float:
-        """A per-keystroke delay that behaves like a person, not a metronome.
+        """A delay that changes from key to key, like a person's typing.
 
-        Delays are log-normally distributed (most keys are quick, a few are
-        slow), and the overall pace drifts every few characters so typing runs
-        in bursts: a few fast keys, then a slower patch, then a pause.
+        A "tempo run" of 1-3 keys all share a rough gear, but every run picks
+        a *different* gear (very fast, fast, medium, slow, very slow), so the
+        next key is never the same speed as the one before for long. On top of
+        that each key gets its own small log-normal jitter.
         """
-        if self._burst_left <= 0:
-            self._burst_left = self.rng.randint(4, 16)
-            # Drift the pace a little, then sometimes jump to a new gear.
-            self._pace = min(2.2, max(0.5, self._pace + self.rng.gauss(0.0, 0.22)))
-            if self.rng.random() < 0.2:
-                self._pace = min(2.2, max(0.5, self._pace * self.rng.uniform(0.75, 1.3)))
-        self._burst_left -= 1
-        sigma = max(0.05, self.s.jitter)
+        if self._tempo_left <= 0:
+            old = self._tempo
+            choices = [t for t in _TEMPOS if old is None or t != old]
+            self._tempo = self.rng.choice(choices)
+            self._tempo_left = self.rng.randint(1, 3)
+        self._tempo_left -= 1
+        sigma = max(0.04, self.s.jitter * 0.4)
         factor = math.exp(self.rng.gauss(0.0, sigma))
-        return max(0.012, self.s.char_delay() * self._pace * factor)
+        return max(0.012, self.s.char_delay() * self._tempo * factor)
 
     def _pause(self, mean: float, sigma: float = 0.6) -> None:
         """Pause for a log-normally distributed length around ``mean`` seconds."""
