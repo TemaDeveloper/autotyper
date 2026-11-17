@@ -162,6 +162,24 @@ def test_pauses_when_ide_not_front_and_resyncs_after_caret_moved(tmp_path):
     assert normalize(path.read_text()) == normalize(KOTLIN)
 
 
+def test_pause_keeps_block_and_repairs_only_the_wrong_line(tmp_path):
+    # A pause mid-block previously deleted everything after the first wrong
+    # line. Now the wrong line is repaired in place and the block stays.
+    target = KOTLIN
+    wrong = KOTLIN.replace("    private var count = 0\n", "    private var count = 7\n")
+    path = tmp_path / "MainActivity.kt"
+    path.write_text(wrong)
+
+    s = Settings(typo_rate=0, line_rewrite_rate=0, block_rewrite_rate=0, format_rewrite_rate=0)
+    eng, ed, *_ = make(tmp_path, settings=s)
+    out = eng.type_file(str(path), target)
+    assert out.status == "typed", ed.text
+    assert normalize(path.read_text()) == normalize(target)
+    # Never selected to document end and deleted the rest of the block.
+    assert ("press", "end", ("cmd", "shift")) not in ed.events
+    assert ("press", "delete", ("cmd",)) in ed.events  # line cleared in place
+
+
 def test_repair_when_typing_gets_mangled(tmp_path):
     # Engine types quotes normally, but this simulated IDE still auto-inserts
     # "" after '=' in XML attributes, so the quotes double up; repair must fix it.

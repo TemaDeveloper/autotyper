@@ -116,6 +116,14 @@ class FakeJetBrainsEditor:
                 self.caret -= 1
             return
 
+        if key == "delete" and m == {"cmd"}:
+            # Delete to line start (Cmd+Backspace): keeps the line/newline.
+            self._delete_selection()
+            start = self._line_start(self.caret)
+            self._delete(start, self.caret)
+            self.caret = start
+            return
+
         if key == "a" and m == {"cmd"}:
             self.anchor = 0
             self.caret = len(self.text)

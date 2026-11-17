@@ -22,6 +22,8 @@ class Keymap:
 
     select_all: str = "cmd+a"
     select_to_doc_end: str = "cmd+shift+end"
+    select_to_line_end: str = "shift+end"
+    delete_to_line_start: str = "cmd+delete"
     doc_end: str = "cmd+end"
     delete_forward: str = "forward_delete"
     goto_line: str = "cmd+l"

@@ -395,6 +395,56 @@ class TypingEngine:
         self._cmd("select_to_doc_end")
         self._cmd("delete_forward")
 
+    def _clear_line(self) -> None:
+        """Clear the current line's content but keep the line itself.
+
+        Moves to the end of the line and deletes back to the start, so the
+        newline survives even when the line is empty.
+        """
+        self._key("end")
+        self._cmd("delete_to_line_start")
+
+    def _clear_auto_tail(self, line: str, is_xml: bool) -> None:
+        """Drop only what the IDE auto-inserted right after the caret on this line.
+
+        Normal typing finishes a line and then clears to document end; that
+        would delete the correct lines below. Here we remove just the one or
+        two synthetic closers that follow the caret on the line we retyped.
+        """
+        if not line:
+            return
+        if is_xml:
+            stripped = line.lstrip()
+            if (
+                stripped.startswith("<")
+                and not stripped.startswith(("</", "<!--", "<?", "<!"))
+                and not stripped.rstrip().endswith("/>")
+            ):
+                m = _OPEN_TAG.match(stripped)
+                if m is not None:
+                    for _ in range(len(f"</{m.group(1)}>")):
+                        self._key("forward_delete")
+                    return
+        if line[-1] in "([{":
+            self._key("forward_delete")
+
+    def _repair_line(self, k: int, line: str, skip: set[int], offset: int, is_xml: bool) -> bool:
+        """Rewrite exactly one wrong line in place, keeping everything below it.
+
+        Returns False if a pause interrupted the repair (the caller re-syncs).
+        """
+        self._goto_line(k + 1)
+        self._clear_line()
+        for col in range(len(line)):
+            self._ready(check_title=True)
+            if self._dirty:
+                return False
+            if offset + col in skip:
+                continue
+            self._human_char(line[col])
+        self._clear_auto_tail(line, is_xml)
+        return True
+
     def _newline(self) -> None:
         self._cmd("escape")
         self._clear_after_caret()
@@ -422,33 +472,43 @@ class TypingEngine:
         except FileNotFoundError:
             return ""
 
-    def _sync(self, body: list[str]) -> tuple[int, bool]:
-        """Put the caret on an empty last line after the longest correct prefix.
+    def _sync(self, body: list[str], line_offsets: list[int], skip: set[int], is_xml: bool) -> tuple[int, bool]:
+        """Put the caret on the next line to type, repairing wrong lines in place.
 
         Returns (index of next target line to type, whether that line must be
         typed with its own indentation because the IDE did not indent it).
+
+        When a pause left one wrong line inside an otherwise correctly-shaped
+        block, that single line is rewritten in place so the block is never
+        deleted. Structural differences (extra/missing lines) still retype the
+        tail, which is the only way to fix them.
         """
-        for _ in range(6):
+        for _ in range(max(6, len(body) + 4)):
             self._dirty = False
             self._save()
             disk = self._read_disk().split("\n")
+            typed = disk[:-1] if (disk and disk[-1] == "") else disk
             k = 0
-            while k < len(body) and k < len(disk) and disk[k].strip() == body[k].strip():
+            while k < len(body) and k < len(typed) and typed[k].strip() == body[k].strip():
                 k += 1
-            # A line is only "done" if it is followed by a newline in the doc.
-            if k == len(disk):
-                k -= 1
+            if k >= len(body):
+                return len(body), False
             if k <= 0:
                 self._cmd("select_all")
                 self._cmd("delete_forward")
-                k, own_indent = 0, True
-            else:
-                self._goto_line(k + 1)
-                self._clear_after_caret()
-                own_indent = True
-            if not self._dirty:
-                return k, own_indent
-        return k, own_indent
+                return 0, True
+            if k < len(typed) and len(typed) == len(body):
+                # Same structure, just a wrong line: rewrite that line in place.
+                self._repair_line(k, body[k], skip, line_offsets[k], is_xml)
+                continue
+            # Structural difference, or only the trailing empty line remains:
+            # continue after the last correct line.
+            self._goto_line(k + 1)
+            self._clear_after_caret()
+            return k, True
+        self._cmd("select_all")
+        self._cmd("delete_forward")
+        return 0, True
 
     # ------------------------------------------------------------------ files
     def open(self, path: str) -> None:
@@ -487,7 +547,7 @@ class TypingEngine:
         mistakes = 0
         rewritten_lines: set[int] = set()
         rewritten_blocks: set[tuple[int, int]] = set()
-        i, own_indent = self._sync(body)
+        i, own_indent = self._sync(body, line_offsets, skip, is_xml_file)
         while i < len(body):
             line = body[i]
             self.on_progress(path, i + 1, len(body))
@@ -512,7 +572,7 @@ class TypingEngine:
 
             if restarted or self._dirty:
                 resyncs += 1
-                i, own_indent = self._sync(body)
+                i, own_indent = self._sync(body, line_offsets, skip, is_xml_file)
                 continue
 
             self._newline()
